@@ -51,3 +51,5 @@ Ensure the Jenkins server has permission to run the AWS CLI and access the ECS c
 
 📜 License
 MIT License — feel free to adapt and use.
+
+🔗 [View the Jenkins Dynamic Dropdown Script](https://github.com/sarowar-alam/sarowar/tree/main/dynamic-drop-down-jenkins)
