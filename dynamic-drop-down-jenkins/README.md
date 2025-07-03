@@ -12,7 +12,7 @@ This repository contains a Jenkins Groovy script that dynamically retrieves **no
 
 ## 📁 File
 
-- `ecs_service_discovery.groovy`: Main script used in Jenkins scripted pipeline or Active Choices parameters
+- `dynamic-drop-down-jenkins/dynamic-drop-down.gvy`: Main script used in Jenkins scripted pipeline or Active Choices parameters
 
 ## ✅ Prerequisites
 
