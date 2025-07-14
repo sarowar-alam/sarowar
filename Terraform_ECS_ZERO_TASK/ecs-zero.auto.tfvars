@@ -1,0 +1,11 @@
+#TAGs
+tag_environment=""
+tag_system=""
+tag_owner=""
+cost_app=""
+tag_company=""
+region = "us-west-2"
+cluster_name=""
+ecs_Name=""
+sqs_url=""
+iam_role_arn=""
