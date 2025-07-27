@@ -7,7 +7,6 @@ from pathlib import Path
 from datetime import datetime
 
 def configure_logging():
-    """Configure basic logging to console"""
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
@@ -15,29 +14,13 @@ def configure_logging():
     )
 
 def get_cert_files_path(cert_cn):
-    """
-    Search for JKS certificate files matching the given Common Name pattern.
-    
-    Args:
-        cert_cn (str): Certificate Common Name (e.g., "*.xbox1.com")
-    
-    Returns:
-        dict: Dictionary containing cert_dir and jks_path if found, None otherwise
-    """
-    # Replace wildcard with '!' for directory matching
     escaped_domain = cert_cn.replace('*', '!')
-    # Get actual domain without wildcard for filename matching
     clean_domain = cert_cn.replace('*.', '')
-    # Base path similar to Posh-ACME's structure
     base_path = Path(os.getenv('LOCALAPPDATA')) / 'Posh-ACME' / 'LE_PROD'
     
     try:
-        # Search through all directories recursively
         for root, dirs, files in os.walk(base_path):
-            # Look for the escaped domain directory
             cert_dir = Path(root) / escaped_domain
-            
-            # Search for JKS file with pattern jenkinsl.{clean_domain}.jks
             jks_pattern = f"jenkinsl.{clean_domain}.jks"
             jks_files = glob.glob(str(cert_dir / jks_pattern))
             
@@ -58,19 +41,6 @@ def get_cert_files_path(cert_cn):
         return None
 
 def transfer_jks_to_linux(jks_path, remote_ip, pem_path, clean_domain, timestamp):
-    """
-    Transfer JKS file to Linux server using paramiko
-    
-    Args:
-        jks_path (str): Local path to JKS file
-        remote_ip (str): Remote server IP
-        pem_path (str): Path to PEM file for authentication
-        clean_domain (str): Clean domain name for folder creation
-        timestamp (str): Timestamp for folder naming
-    
-    Returns:
-        str: Remote path where file was transferred, None if failed
-    """
     username = "rocky"
     remote_folder = f"/home/{username}/cert_{timestamp}"
     remote_path = f"{remote_folder}/jenkinsl.{clean_domain}.jks"
@@ -107,17 +77,6 @@ def transfer_jks_to_linux(jks_path, remote_ip, pem_path, clean_domain, timestamp
             ssh.close()
 
 def deploy_jks_to_jenkins(ssh, clean_domain, timestamp):
-    """
-    Execute the deployment steps on the remote server with root privileges
-    
-    Args:
-        ssh: Paramiko SSH client
-        clean_domain: Domain name without wildcard
-        timestamp: Timestamp string for backup files
-    
-    Returns:
-        tuple: (success_status, backup_path) 
-    """
     try:
         jenkins_cert_path = f"/var/lib/jenkins/certs/jenkinsl.{clean_domain}.jks"
         backup_path = f"{jenkins_cert_path}_backup_{timestamp}"
