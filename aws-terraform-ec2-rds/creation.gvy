@@ -32,6 +32,7 @@ pipeline {
         stage('Terraform Init') {
             steps {
                 bat '''
+                cd aws-terraform-ec2-rds
                 echo Initializing Terraform...
                 terraform init -reconfigure
                 '''
@@ -42,6 +43,7 @@ pipeline {
             steps {
                 bat '''
                 echo Validating Terraform configuration...
+                cd aws-terraform-ec2-rds
                 terraform validate
                 '''
             }
@@ -51,6 +53,7 @@ pipeline {
             steps {
                 bat '''
                 echo Creating execution plan...
+                cd aws-terraform-ec2-rds
                 terraform plan -out=tfplan
                 '''
                 archiveArtifacts artifacts: 'tfplan', fingerprint: true
@@ -63,6 +66,7 @@ pipeline {
                     input message: 'Apply Terraform changes?', ok: 'Apply'
                     bat '''
                     echo Applying Terraform configuration...
+                    cd aws-terraform-ec2-rds
                     terraform apply -auto-approve tfplan
                     '''
                 }
@@ -73,6 +77,7 @@ pipeline {
             steps {
                 bat '''
                 echo Generating outputs...
+                cd aws-terraform-ec2-rds
                 terraform output -json > terraform_output.json
                 type terraform_output.json
                 '''
