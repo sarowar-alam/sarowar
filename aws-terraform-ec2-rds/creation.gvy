@@ -35,12 +35,11 @@ pipeline {
         }
 
 
-        stage('Checkout Git Repository') {
+        stage('CheckoutGitRepository') {
             steps {
                 bat 'echo Checking out Terraform code from Git...'
                 git branch: 'main', 
                     url: 'https://github.com/sarowar-alam/sarowar.git'
-                
                 bat 'echo Current directory: %CD%'
                 bat 'dir'
             }
@@ -56,37 +55,13 @@ pipeline {
                 cd aws-terraform-ec2-rds
                 echo Initializing Terraform...
                 terraform init -reconfigure
-                '''
-            }
-        }
-        
-        stage('Terraform Validate') {
-            when {
-                    expression { IS_CREATE } // Proceed only if validity is less 
-                }               
-            steps {
-                bat '''
-                echo Validating Terraform configuration...
-                cd aws-terraform-ec2-rds
                 terraform validate
-                '''
-            }
-        }
-        
-        stage('Terraform Plan') {
-            when {
-                    expression { IS_CREATE } // Proceed only if validity is less 
-                }               
-            steps {
-                bat '''
-                echo Creating execution plan...
-                cd aws-terraform-ec2-rds
                 terraform plan
                 '''
             }
         }
         
-        stage('Terraform Apply') {
+        stage('TerraformApply') {
             when {
                     expression { IS_CREATE } // Proceed only if validity is less 
                 }  
@@ -123,14 +98,12 @@ pipeline {
             }
         }
 
-        stage('Terraform Destroy') {
+        stage('TerraformDestroy') {
             when {
                     expression { IS_DELETE } // Proceed only if validity is less 
                 }   
-
             steps {
                 timeout(time: 30, unit: 'MINUTES') {
-                    input message: 'Apply Terraform changes?', ok: 'Apply'
                     bat '''
                     echo Destroying Terraform configuration...
                     cd aws-terraform-ec2-rds
@@ -140,22 +113,7 @@ pipeline {
                 }
             }
         }
-        
-        stage('Output Results') {
-            when {
-                    expression { IS_CREATE } // Proceed only if validity is less 
-                }   
 
-            steps {
-                bat '''
-                echo Generating outputs...
-                cd aws-terraform-ec2-rds
-                terraform output -json > terraform_output.json
-                type terraform_output.json
-                '''
-                archiveArtifacts artifacts: 'terraform_output.json', fingerprint: true
-            }
-        }
     }
     
     post {
