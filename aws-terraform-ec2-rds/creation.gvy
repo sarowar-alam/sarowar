@@ -116,16 +116,28 @@ pipeline {
 
     }
     
-    post {
-        always {
-            bat 'echo Cleaning up workspace...'
-            cleanWs()
-        }
-        success {
-            bat 'echo Terraform deployment completed successfully!'
-        }
-        failure {
-            bat 'echo Terraform deployment failed! Check the logs for details.'
+    post{
+        always{
+            script{
+                try {
+                    if (fileExists(env.WORKSPACE)) {
+                        echo "Cleaning up workspace: ${env.WORKSPACE}"
+                        deleteDir()
+                        cleanWs(cleanWhenNotBuilt: false,
+                                deleteDirs: true,
+                                disableDeferredWipeout: true,
+                                notFailBuild: true,
+                                patterns: [[pattern: '.gitignore', type: 'INCLUDE'],
+                                        [pattern: '.propsfile', type: 'EXCLUDE']])
+                    } else {
+                        echo "Workspace directory does not exist or already cleaned."
+                    }
+                } catch (Exception e) {
+                    echo "Error during workspace cleanup: ${e.message}"
+                }
+            }
         }
     }
+
+
 }
