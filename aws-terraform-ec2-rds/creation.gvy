@@ -81,9 +81,8 @@ pipeline {
                 bat '''
                 echo Creating execution plan...
                 cd aws-terraform-ec2-rds
-                terraform plan -out=tfplan
+                terraform plan
                 '''
-                archiveArtifacts artifacts: 'tfplan', fingerprint: true
             }
         }
         
@@ -98,7 +97,7 @@ pipeline {
                     bat '''
                     echo Applying Terraform configuration...
                     cd aws-terraform-ec2-rds
-                    terraform apply -auto-approve tfplan
+                    terraform apply -auto-approve
                     '''
                 }
             }
@@ -115,6 +114,7 @@ pipeline {
                     bat '''
                     echo Destroying Terraform configuration...
                     cd aws-terraform-ec2-rds
+                    terraform init -reconfigure
                     terraform destroy -auto-approve tfplan
                     '''
                 }
