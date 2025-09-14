@@ -108,7 +108,7 @@ pipeline {
                     echo Destroying Terraform configuration...
                     cd aws-terraform-ec2-rds
                     terraform init -reconfigure
-                    terraform destroy -auto-approve tfplan
+                    terraform destroy -auto-approve
                     '''
                 }
             }
