@@ -1,22 +1,40 @@
 pipeline {
     agent { label 'built-in' }
+
+
+    parameters {
+        choice(
+            name: 'TERRAFORM_ACTION',
+            choices: [
+                'Create',
+                'Delete' 
+            ],
+            description: 'Whether you want to create / delete the environment'
+        )
+    }
+
     
     environment {
-        TF_VAR_environment = 'prod'
-        TF_VAR_region = 'ap-south-1'
-        TF_VAR_vpc_cidr = '10.0.0.0/16'
-        TF_VAR_public_subnet_cidrs = '["10.0.1.0/24", "10.0.2.0/24"]'
-        TF_VAR_private_subnet_cidrs = '["10.0.3.0/24", "10.0.4.0/24"]'
-        TF_VAR_allowed_ips = '["65.2.132.165/32"]'  // Replace with your actual IP
-        TF_VAR_key_name = 'sarowar_ostad'
-        TF_VAR_bastion_instance_type = 't3.medium'
-        TF_VAR_windows_instance_type = 't3.medium'
-        TF_VAR_ubuntu_instance_type = 't3.micro'
-        TF_VAR_mariadb_database_name = 'mariadbdemo'
-        TF_VAR_sqlserver_database_name = 'sqlserverdemo'
+
+        IS_CREATE = false
+        IS_DELETE = false             
     }
     
     stages {
+
+
+        stage('InitializeVariables') {
+            steps {
+                script {
+
+                    IS_CREATE = params.TERRAFORM_ACTION == 'Create'
+                    IS_DELETE = params.TERRAFORM_ACTION == 'Delete'
+                    echo "Creation is: ${IS_CREATE} | Deletion is: ${IS_DELETE}"
+                }
+            }
+        }
+
+
         stage('Checkout Git Repository') {
             steps {
                 bat 'echo Checking out Terraform code from Git...'
@@ -30,6 +48,9 @@ pipeline {
         
         
         stage('Terraform Init') {
+            when {
+                    expression { IS_CREATE } // Proceed only if validity is less 
+                }             
             steps {
                 bat '''
                 cd aws-terraform-ec2-rds
@@ -40,6 +61,9 @@ pipeline {
         }
         
         stage('Terraform Validate') {
+            when {
+                    expression { IS_CREATE } // Proceed only if validity is less 
+                }               
             steps {
                 bat '''
                 echo Validating Terraform configuration...
@@ -50,6 +74,9 @@ pipeline {
         }
         
         stage('Terraform Plan') {
+            when {
+                    expression { IS_CREATE } // Proceed only if validity is less 
+                }               
             steps {
                 bat '''
                 echo Creating execution plan...
@@ -61,6 +88,10 @@ pipeline {
         }
         
         stage('Terraform Apply') {
+            when {
+                    expression { IS_CREATE } // Proceed only if validity is less 
+                }   
+
             steps {
                 timeout(time: 30, unit: 'MINUTES') {
                     input message: 'Apply Terraform changes?', ok: 'Apply'
@@ -72,8 +103,29 @@ pipeline {
                 }
             }
         }
+
+        stage('Terraform Destroy') {
+            when {
+                    expression { IS_DELETE } // Proceed only if validity is less 
+                }   
+
+            steps {
+                timeout(time: 30, unit: 'MINUTES') {
+                    input message: 'Apply Terraform changes?', ok: 'Apply'
+                    bat '''
+                    echo Destroying Terraform configuration...
+                    cd aws-terraform-ec2-rds
+                    terraform destroy -auto-approve tfplan
+                    '''
+                }
+            }
+        }
         
         stage('Output Results') {
+            when {
+                    expression { IS_CREATE } // Proceed only if validity is less 
+                }   
+
             steps {
                 bat '''
                 echo Generating outputs...
