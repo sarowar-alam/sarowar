@@ -32,7 +32,41 @@ environment {
             }
         }
 
+
+        stage('CheckoutGitRepository') {
+            steps {
+                bat 'echo Checking out Terraform code from Git...'
+                git branch: 'main', 
+                    url: 'https://github.com/sarowar-alam/sarowar.git'
+                bat 'echo Current directory: %CD%'
+                bat 'dir'
+            }
+        }
+
+        stage('Terraform Init') {
+            when {
+                    expression { IS_CREATE } // Proceed only if validity is less 
+                }             
+            steps {
+                bat '''
+                cd aws-terraform-ec2-rds
+                echo Initializing Terraform...
+                terraform init -reconfigure
+                terraform validate
+                terraform plan
+                '''
+            }
+        }
+
+
+
+
+
+
     }
+
+
+
 
 
 
