@@ -1,11 +1,12 @@
 pipeline {
     agent any
     stages {
-        stage('Get Jenkins Hostname') {
+        stage('Get Hostname via PowerShell') {
             steps {
                 script {
-                    def hostName = InetAddress.localHost.hostName
-                    echo "Jenkins Hostname: ${hostName}"
+                    // Run PowerShell command
+                    def hostName = powershell(script: "hostname", returnStdout: true).trim()
+                    echo "Jenkins Hostname (via PowerShell): ${hostName}"
                 }
             }
         }
