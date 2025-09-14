@@ -9,21 +9,33 @@ It is modularized for reusability and supports both Linux and Windows servers.
 
 ```
 .
-├── backend.tf                # Remote state backend (S3)
-├── combine.ps1                # Script to merge all .tf/.sh/.ps1 files into one text file
-├── main.tf                    # Root Terraform configuration (module orchestration)
-├── outputs.tf                 # Root outputs
-├── providers.tf               # Provider configuration
-├── variables.tf               # Root input variables
-├── modules/                   # Reusable Terraform modules
-│   ├── ec2/                   # EC2 instance module
-│   ├── rds/                   # RDS instance module
-│   ├── security-groups/       # Security groups module
-│   └── vpc/                   # VPC and networking module
-└── scripts/                   # User data scripts
-    ├── bastion-userdata.ps1
-    ├── ubuntu-userdata.sh
-    └── windows-userdata.ps1
+├── modules/
+│   ├── ec2/                 # EC2 instance module
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   ├── rds/                 # RDS database module
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   ├── security-groups/     # Security groups module
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   └── vpc/                 # VPC module
+│       ├── main.tf
+│       ├── variables.tf
+│       └── outputs.tf
+├── scripts/                 # User data scripts
+│   ├── bastion-userdata.ps1
+│   ├── ubuntu-userdata.sh
+│   └── windows-userdata.ps1
+├── backend.tf              # Terraform backend configuration
+├── main.tf                 # Main infrastructure configuration
+├── outputs.tf             # Output values
+├── providers.tf           # Provider configuration
+├── variables.tf           # Input variables
+└── combine.ps1            # Script to combine all files
 ```
 
 ---
