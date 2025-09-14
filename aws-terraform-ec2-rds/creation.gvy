@@ -88,8 +88,8 @@ pipeline {
         
         stage('Terraform Apply') {
             when {
-                expression { env.IS_CREATE == true }
-            }
+                    expression { IS_CREATE } // Proceed only if validity is less 
+                }  
             
             steps {
                 timeout(time: 30, unit: 'MINUTES') {
