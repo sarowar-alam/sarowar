@@ -95,6 +95,21 @@ environment {
             }
         }
 
+        stage('TerraformDestroy') {
+            when {
+                    expression { IS_DELETE } // Proceed only if validity is less 
+                }   
+            steps {
+                timeout(time: 30, unit: 'MINUTES') {
+                    bat '''
+                    echo Destroying Terraform configuration...
+                    cd aws-terraform-ec2-rds
+                    terraform init -reconfigure
+                    terraform destroy -auto-approve
+                    '''
+                }
+            }
+        }
 
 
 
