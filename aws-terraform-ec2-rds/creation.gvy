@@ -1,7 +1,5 @@
 pipeline {
-    agent {
-        label 'windows'  // Use Windows agent
-    }
+    agent { label 'built-in' }
     
     environment {
         TF_VAR_environment = 'prod'
@@ -9,8 +7,8 @@ pipeline {
         TF_VAR_vpc_cidr = '10.0.0.0/16'
         TF_VAR_public_subnet_cidrs = '["10.0.1.0/24", "10.0.2.0/24"]'
         TF_VAR_private_subnet_cidrs = '["10.0.3.0/24", "10.0.4.0/24"]'
-        TF_VAR_allowed_ips = '["YOUR_PUBLIC_IP/32"]'  // Replace with your actual IP
-        TF_VAR_key_name = 'ostad-keypair'
+        TF_VAR_allowed_ips = '["65.2.132.165/32"]'  // Replace with your actual IP
+        TF_VAR_key_name = 'sarowar_ostad'
         TF_VAR_bastion_instance_type = 't3.medium'
         TF_VAR_windows_instance_type = 't3.medium'
         TF_VAR_ubuntu_instance_type = 't3.micro'
@@ -23,7 +21,7 @@ pipeline {
             steps {
                 bat 'echo Checking out Terraform code from Git...'
                 git branch: 'main', 
-                    url: 'https://github.com/your-username/your-terraform-repo.git'
+                    url: 'https://github.com/sarowar-alam/sarowar.git'
                 
                 bat 'echo Current directory: %CD%'
                 bat 'dir'
