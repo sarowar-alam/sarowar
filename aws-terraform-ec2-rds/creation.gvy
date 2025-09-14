@@ -88,17 +88,37 @@ pipeline {
         
         stage('Terraform Apply') {
             when {
-                    expression { IS_CREATE } // Proceed only if validity is less 
-                }   
-
+                expression { env.IS_CREATE == true }
+            }
+            
             steps {
                 timeout(time: 30, unit: 'MINUTES') {
-                    input message: 'Apply Terraform changes?', ok: 'Apply'
-                    bat '''
-                    echo Applying Terraform configuration...
-                    cd aws-terraform-ec2-rds
-                    terraform apply -auto-approve
-                    '''
+                    script {
+                        def userInput = input(
+                            id: 'userInput',
+                            message: 'Apply Terraform changes?',
+                            parameters: [
+                                choice(
+                                    name: 'ACTION', 
+                                    choices: 'Proceed\nAbort', 
+                                    description: 'Choose to proceed with deployment or abort'
+                                )
+                            ]
+                        )
+                        
+                        if (userInput == 'Proceed') {
+                            echo 'User clicked "Proceed", applying Terraform changes...'
+                            bat '''
+                            echo Applying Terraform configuration...
+                            cd aws-terraform-ec2-rds
+                            terraform apply -auto-approve
+                            '''
+                        } else {
+                            echo 'User chose to abort deployment'
+                            currentBuild.result = 'ABORTED'
+                            error('Deployment aborted by user')
+                        }
+                    }
                 }
             }
         }
