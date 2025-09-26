@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Nginx + Backend App</title>
+</head>
+<body>
+    <h1>Frontend served by Nginx</h1>
+    <button onclick="fetchData()">Test Backend API</button>
+    <div id="result"></div>
+
+    <script>
+        async function fetchData() {
+            try {
+                const response = await fetch('/api/data');
+                const data = await response.json();
+                document.getElementById('result').innerHTML = JSON.stringify(data);
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+    </script>
+</body>
+</html>

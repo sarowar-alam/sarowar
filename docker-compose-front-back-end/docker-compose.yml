@@ -1,0 +1,26 @@
+version: '3.8'
+services:
+  nginx-app:
+    image: my-nginx-app
+    build: .
+    ports:
+      - "80:80"
+    restart: unless-stopped
+    container_name: my-nginx-service
+    depends_on:
+      - backend-app
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+
+  backend-app:
+    image: my-backend-app
+    build:
+      context: ./backend    # ← Make sure this points to backend directory
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    container_name: my-backend-service
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    expose:
+      - "3000"
