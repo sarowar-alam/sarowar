@@ -44,14 +44,5 @@ location /api/ {
     proxy_pass http://backend/api/;
 }
 ```
-
-## PowerShell Helper Script
-The `combine.ps1` script scans project files and combines them into `combined_files.txt` for easy review/sharing.
-
-Run it with:
-```powershell
-.\combine.ps1
-```
-
 ---
 ✅ Now you can test the backend API through Nginx by clicking the button in the frontend page!
