@@ -1,0 +1,16 @@
+---
+- name: 🏗️ Complete Infrastructure Deployment
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Include infrastructure setup
+      include_tasks: 01-setup-aws-infrastructure.yml
+
+- name: 🛠️ Configure All Servers
+  hosts: all
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Basic server configuration
+      include_tasks: 02-configure-servers.yml
+  when: "'tag_Role_web' in group_names"

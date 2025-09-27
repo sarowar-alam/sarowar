@@ -1,0 +1,11 @@
+---
+# Web servers specific variables
+nginx_worker_connections: 1024
+nginx_keepalive_timeout: 65
+http_port: 80
+https_port: 443
+
+# SSL settings
+ssl_enabled: false
+ssl_cert_path: /etc/ssl/certs
+ssl_key_path: /etc/ssl/private

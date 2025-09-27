@@ -1,0 +1,21 @@
+---
+# Global variables for all hosts
+ansible_python_interpreter: /usr/bin/python3
+system_timezone: UTC
+admin_email: sarowar@ostad.com
+
+# Application settings
+app_name: mywebapp
+app_version: 1.0.0
+app_port: 8080
+
+# AWS Static Settings
+aws_region: ap-south-1
+ubuntu_ami: ami-02d26659fd82cf299
+key_name: sarowar_ostad
+key_file_path: /root/sarowar_ostad.pem
+project_name: ansible-ostad
+
+# VPC Settings
+vpc_cidr: 10.0.0.0/16
+public_subnet_cidr: 10.0.1.0/24

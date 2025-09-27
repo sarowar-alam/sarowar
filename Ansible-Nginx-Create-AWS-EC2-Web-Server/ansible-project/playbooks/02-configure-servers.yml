@@ -1,0 +1,126 @@
+---
+- name: ⚙️ Configure Web Servers
+  hosts: tag_Role_web
+  gather_facts: true
+  become: true
+  vars:
+    aws_region: ap-south-1
+    project_name: ansible-ostad
+
+  tasks:
+    - name: Check if we can connect
+      ping:
+
+    - name: Update package cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install basic packages
+      apt:
+        name:
+          - curl
+          - wget
+          - vim
+          - htop
+          - tree
+          - unzip
+          - git
+          - ufw
+        state: present
+
+    - name: Configure passwordless sudo for ansible
+      copy:
+        content: "ubuntu ALL=(ALL) NOPASSWD:ALL"
+        dest: /etc/sudoers.d/ansible
+        mode: '0440'
+        validate: 'visudo -cf %s'
+
+
+
+
+    - name: Configure UFW firewall
+      ufw:
+        rule: "{{ item.rule }}"
+        port: "{{ item.port }}"
+        proto: "{{ item.proto | default('tcp') }}"
+      loop:
+        - { rule: allow, port: '22', proto: tcp }
+        - { rule: allow, port: '80', proto: tcp }
+        - { rule: allow, port: '443', proto: tcp }
+      notify: enable ufw
+
+    - name: Install Nginx
+      apt:
+        name: nginx
+        state: latest
+
+    - name: Create custom HTML page
+      copy:
+        content: |
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Ansible Demo - Static Configuration</title>
+              <style>
+                  body { font-family: Arial, sans-serif; margin: 40px; background: #f0f0f0; }
+                  .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+                  h1 { color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+                  .info { background: #e8f4fd; padding: 15px; border-radius: 5px; margin: 15px 0; }
+                  .success { color: #27ae60; font-weight: bold; }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <h1>🚀 Ansible Demo - Static Configuration</h1>
+                  <div class="info">
+                      <p><strong>Hostname:</strong> {{ ansible_hostname }}</p>
+                      <p><strong>IP Address:</strong> {{ ansible_default_ipv4.address }}</p>
+                      <p><strong>OS:</strong> {{ ansible_distribution }} {{ ansible_distribution_version }}</p>
+                      <p><strong>Region:</strong> {{ aws_region }}</p>
+                      <p><strong>Project:</strong> {{ project_name }}</p>
+                  </div>
+                  <p class="success">✅ This server was configured with static AWS settings!</p>
+              </div>
+          </body>
+          </html>
+        dest: /var/www/html/index.html
+        owner: www-data
+        group: www-data
+        mode: '0644'
+      notify: restart nginx
+
+    - name: Ensure Nginx is running and enabled
+      systemd:
+        name: nginx
+        state: started
+        enabled: yes
+
+    - name: Test Nginx configuration
+      command: nginx -t
+      register: nginx_test
+      changed_when: false
+      notify: restart nginx
+
+    - name: Display server information
+      debug:
+        msg: |
+          🎉 Server configuration complete!
+          🌐 Web server: http://{{ ansible_default_ipv4.address }}
+          🔧 Hostname: {{ ansible_hostname }}
+          📊 OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          🌍 Region: {{ aws_region }}
+
+  handlers:
+    - name: enable ufw
+      ufw:
+        state: enabled
+        policy: deny
+
+    - name: restart nginx
+      systemd:
+        name: nginx
+        state: restarted
+        daemon_reload: yes
