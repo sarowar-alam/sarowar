@@ -1,0 +1,18 @@
+# Set default behavior for all files
+* text=auto
+
+# Force specific line endings for certain file types
+*.txt text
+*.md text
+*.js text eol=lf
+*.py text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.sh text eol=lf
+*.ps1 text eol=lf
+# Binary files should not be modified
+*.png binary
+*.jpg binary
+*.pdf binary
