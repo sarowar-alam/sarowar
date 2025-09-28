@@ -1,0 +1,53 @@
+
+Start-Date: 2025-08-21  10:08:03
+Commandline: apt-get install -qqy grub-pc shim-signed
+Install: mokutil:amd64 (0.6.0-2build3, automatic), grub-efi-amd64-signed:amd64 (1.202.5+2.12-1ubuntu7.3, automatic), grub-efi-amd64-bin:amd64 (2.12-1ubuntu7.3, automatic), efibootmgr:amd64 (18-1build2, automatic), shim-signed:amd64 (1.58+15.8-0ubuntu1)
+End-Date: 2025-08-21  10:08:05
+
+Start-Date: 2025-08-21  10:15:04
+Commandline: apt-get remove --purge --assume-yes ^linux-.* linux-base+
+Purge: linux-tools-common:amd64 (6.8.0-78.78), linux-virtual:amd64 (6.8.0-78.78), linux-image-6.8.0-78-generic:amd64 (6.8.0-78.78), linux-headers-generic:amd64 (6.8.0-78.78), linux-image-virtual:amd64 (6.8.0-78.78), linux-tools-6.8.0-78-generic:amd64 (6.8.0-78.78), linux-tools-6.8.0-78:amd64 (6.8.0-78.78), linux-headers-6.8.0-78:amd64 (6.8.0-78.78), linux-headers-virtual:amd64 (6.8.0-78.78), libc6-dev:amd64 (2.39-0ubuntu8.5), linux-headers-6.8.0-78-generic:amd64 (6.8.0-78.78), linux-libc-dev:amd64 (6.8.0-78.78), linux-modules-6.8.0-78-generic:amd64 (6.8.0-78.78)
+End-Date: 2025-08-21  10:15:08
+
+Start-Date: 2025-08-21  10:15:13
+Commandline: apt-get install --assume-yes linux-aws
+Install: linux-image-aws:amd64 (6.14.0-1011.11~24.04.1, automatic), linux-tools-common:amd64 (6.8.0-78.78, automatic), linux-image-6.14.0-1011-aws:amd64 (6.14.0-1011.11~24.04.1, automatic), iucode-tool:amd64 (2.3.1-3build1, automatic), linux-headers-aws:amd64 (6.14.0-1011.11~24.04.1, automatic), linux-aws-6.14-headers-6.14.0-1011:amd64 (6.14.0-1011.11~24.04.1, automatic), linux-aws-6.14-tools-6.14.0-1011:amd64 (6.14.0-1011.11~24.04.1, automatic), linux-modules-6.14.0-1011-aws:amd64 (6.14.0-1011.11~24.04.1, automatic), microcode-initrd:amd64 (3build1, automatic), linux-aws:amd64 (6.14.0-1011.11~24.04.1), linux-headers-6.14.0-1011-aws:amd64 (6.14.0-1011.11~24.04.1, automatic), linux-tools-6.14.0-1011-aws:amd64 (6.14.0-1011.11~24.04.1, automatic), amd64-microcode:amd64 (3.20250311.1ubuntu0.24.04.1, automatic), intel-microcode:amd64 (3.20250512.0ubuntu0.24.04.1, automatic)
+End-Date: 2025-08-21  10:15:31
+
+Start-Date: 2025-08-21  10:15:35
+Commandline: apt-get autoremove --purge --assume-yes
+Purge: manpages-dev:amd64 (6.7-2), libsharpyuv0:amd64 (1.3.2-0.4build3), libaom3:amd64 (3.8.2-2ubuntu0.1), libjpeg-turbo8:amd64 (2.1.5-2ubuntu2), libheif1:amd64 (1.17.6-1ubuntu4.1), libheif-plugin-libde265:amd64 (1.17.6-1ubuntu4.1), libdeflate0:amd64 (1.19-1build1.1), libjpeg8:amd64 (8c-2ubuntu11), libtiff6:amd64 (4.5.1+git230720-4ubuntu2.3), liblerc4:amd64 (4.0.0+ds-4ubuntu2), libxpm4:amd64 (1:3.5.17-1build2), libfontconfig1:amd64 (2.15.0-1.1ubuntu2), libheif-plugin-aomdec:amd64 (1.17.6-1ubuntu4.1), libheif-plugin-aomenc:amd64 (1.17.6-1ubuntu4.1), fontconfig-config:amd64 (2.15.0-1.1ubuntu2), rpcsvc-proto:amd64 (1.4.2-0ubuntu7), libwebp7:amd64 (1.3.2-0.4build3), fonts-dejavu-mono:amd64 (2.37-8), libcrypt-dev:amd64 (1:4.4.36-4build1), libjbig0:amd64 (2.1-6.1ubuntu2), libc-dev-bin:amd64 (2.39-0ubuntu8.5), libc-devtools:amd64 (2.39-0ubuntu8.5), fonts-dejavu-core:amd64 (2.37-8), libgd3:amd64 (2.3.3-9ubuntu5), libde265-0:amd64 (1.0.15-1build3)
+End-Date: 2025-08-21  10:15:38
+
+Start-Date: 2025-08-21  10:15:41
+Commandline: apt-get install --assume-yes ec2-instance-connect
+Install: ec2-instance-connect:amd64 (1.1.17-0ubuntu1)
+End-Date: 2025-08-21  10:15:42
+
+Start-Date: 2025-08-21  10:15:45
+Commandline: apt-get install --assume-yes ec2-hibinit-agent hibagent
+Install: hibagent:amd64 (1.0.1+git20230216.9ac1209f7-0ubuntu3), acpid:amd64 (1:2.0.34-1ubuntu2, automatic), ec2-hibinit-agent:amd64 (1.0.0-0ubuntu16.24.04.1)
+End-Date: 2025-08-21  10:15:46
+
+Start-Date: 2025-08-21  10:15:49
+Commandline: apt-get install --assume-yes chrony
+Install: chrony:amd64 (4.5-1ubuntu4.2), tzdata-legacy:amd64 (2025b-0ubuntu0.24.04.1, automatic)
+Remove: systemd-timesyncd:amd64 (255.4-1ubuntu8.10)
+End-Date: 2025-08-21  10:15:51
+
+Start-Date: 2025-08-21  10:15:56
+Commandline: apt-get purge --assume-yes ?config-files
+Purge: systemd-timesyncd:amd64 ()
+End-Date: 2025-08-21  10:15:56
+
+Start-Date: 2025-08-21  10:16:40
+Commandline: apt-get -y install irqbalance
+Install: irqbalance:amd64 (1.9.3-2ubuntu5)
+End-Date: 2025-08-21  10:16:41
+
+Start-Date: 2025-09-28  10:57:50
+Commandline: /usr/bin/apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold dist-upgrade --auto-remove
+Requested-By: ubuntu (1000)
+Install: linux-image-6.14.0-1013-aws:amd64 (6.14.0-1013.13~24.04.1, automatic), linux-aws-6.14-headers-6.14.0-1013:amd64 (6.14.0-1013.13~24.04.1, automatic), linux-aws-6.14-tools-6.14.0-1013:amd64 (6.14.0-1013.13~24.04.1, automatic), linux-modules-6.14.0-1013-aws:amd64 (6.14.0-1013.13~24.04.1, automatic), linux-headers-6.14.0-1013-aws:amd64 (6.14.0-1013.13~24.04.1, automatic), linux-tools-6.14.0-1013-aws:amd64 (6.14.0-1013.13~24.04.1, automatic)
+Upgrade: dpkg:amd64 (1.22.6ubuntu6.1, 1.22.6ubuntu6.5), linux-image-aws:amd64 (6.14.0-1011.11~24.04.1, 6.14.0-1013.13~24.04.1), linux-tools-common:amd64 (6.8.0-78.78, 6.8.0-84.84), libpam-runtime:amd64 (1.5.3-5ubuntu5.4, 1.5.3-5ubuntu5.5), coreutils:amd64 (9.4-3ubuntu6, 9.4-3ubuntu6.1), python3.12:amd64 (3.12.3-1ubuntu0.7, 3.12.3-1ubuntu0.8), bind9-host:amd64 (1:9.18.30-0ubuntu0.24.04.2, 1:9.18.39-0ubuntu0.24.04.1), openssh-client:amd64 (1:9.6p1-3ubuntu13.13, 1:9.6p1-3ubuntu13.14), vim:amd64 (2:9.1.0016-1ubuntu7.8, 2:9.1.0016-1ubuntu7.9), xxd:amd64 (2:9.1.0016-1ubuntu7.8, 2:9.1.0016-1ubuntu7.9), linux-headers-aws:amd64 (6.14.0-1011.11~24.04.1, 6.14.0-1013.13~24.04.1), libfwupd2:amd64 (1.9.30-0ubuntu1~24.04.1, 1.9.31-0ubuntu1~24.04.1), libpython3.12-minimal:amd64 (3.12.3-1ubuntu0.7, 3.12.3-1ubuntu0.8), vim-common:amd64 (2:9.1.0016-1ubuntu7.8, 2:9.1.0016-1ubuntu7.9), udisks2:amd64 (2.10.1-6ubuntu1.2, 2.10.1-6ubuntu1.3), openssh-server:amd64 (1:9.6p1-3ubuntu13.13, 1:9.6p1-3ubuntu13.14), landscape-common:amd64 (24.02-0ubuntu5.3, 24.02-0ubuntu5.6), libxml2:amd64 (2.9.14+dfsg-1.3ubuntu3.4, 2.9.14+dfsg-1.3ubuntu3.5), libpython3.12t64:amd64 (3.12.3-1ubuntu0.7, 3.12.3-1ubuntu0.8), libudisks2-0:amd64 (2.10.1-6ubuntu1.2, 2.10.1-6ubuntu1.3), libc6:amd64 (2.39-0ubuntu8.5, 2.39-0ubuntu8.6), locales:amd64 (2.39-0ubuntu8.5, 2.39-0ubuntu8.6), libpam-modules:amd64 (1.5.3-5ubuntu5.4, 1.5.3-5ubuntu5.5), open-vm-tools:amd64 (2:12.4.5-1~ubuntu0.24.04.2, 2:12.5.0-1~ubuntu0.24.04.1), vim-tiny:amd64 (2:9.1.0016-1ubuntu7.8, 2:9.1.0016-1ubuntu7.9), linux-aws:amd64 (6.14.0-1011.11~24.04.1, 6.14.0-1013.13~24.04.1), bind9-dnsutils:amd64 (1:9.18.30-0ubuntu0.24.04.2, 1:9.18.39-0ubuntu0.24.04.1), systemd-hwe-hwdb:amd64 (255.1.4, 255.1.5), libsqlite3-0:amd64 (3.45.1-1ubuntu2.4, 3.45.1-1ubuntu2.5), vim-runtime:amd64 (2:9.1.0016-1ubuntu7.8, 2:9.1.0016-1ubuntu7.9), libpam-modules-bin:amd64 (1.5.3-5ubuntu5.4, 1.5.3-5ubuntu5.5), openssh-sftp-server:amd64 (1:9.6p1-3ubuntu13.13, 1:9.6p1-3ubuntu13.14), libpam0g:amd64 (1.5.3-5ubuntu5.4, 1.5.3-5ubuntu5.5), bind9-libs:amd64 (1:9.18.30-0ubuntu0.24.04.2, 1:9.18.39-0ubuntu0.24.04.1), libc-bin:amd64 (2.39-0ubuntu8.5, 2.39-0ubuntu8.6), python3.12-minimal:amd64 (3.12.3-1ubuntu0.7, 3.12.3-1ubuntu0.8), libpython3.12-stdlib:amd64 (3.12.3-1ubuntu0.7, 3.12.3-1ubuntu0.8), fwupd:amd64 (1.9.30-0ubuntu1~24.04.1, 1.9.31-0ubuntu1~24.04.1)
+End-Date: 2025-09-28  10:58:30

@@ -1,0 +1,56 @@
+---
+- name: Test connections and get hostnames for all servers
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Test Ubuntu SSH connection and get hostname
+      block:
+        - name: Execute hostname command on Ubuntu
+          ansible.builtin.command: hostname
+          register: ubuntu_hostname
+          when: ansible_connection != 'winrm'
+
+        - name: Display Ubuntu connection success
+          debug:
+            msg: |
+              UBUNTU CONNECTION SUCCESS
+              Host: {{ inventory_hostname }}
+              IP: {{ ansible_host }}
+              System Hostname: {{ ubuntu_hostname.stdout }}
+              Connection: SSH with PEM key
+          when: ansible_connection != 'winrm'
+
+      rescue:
+        - name: Display Ubuntu connection failure
+          debug:
+            msg: |
+              UBUNTU CONNECTION FAILED
+              Host: {{ inventory_hostname }}
+              IP: {{ ansible_host }}
+              Error: SSH connection failed - Check PEM key and network
+
+    - name: Test Windows WinRM connection and get hostname
+      block:
+        - name: Get Windows hostname via PowerShell
+          ansible.windows.win_command: hostname
+          register: windows_hostname
+          when: ansible_connection == 'winrm'
+
+        - name: Display Windows connection success
+          debug:
+            msg: |
+              WINDOWS CONNECTION SUCCESS
+              Host: {{ inventory_hostname }}
+              IP: {{ ansible_host }}
+              System Hostname: {{ windows_hostname.stdout }}
+              Connection: WinRM with username/password
+          when: ansible_connection == 'winrm'
+
+      rescue:
+        - name: Display Windows connection failure
+          debug:
+            msg: |
+              WINDOWS CONNECTION FAILED
+              Host: {{ inventory_hostname }}
+              IP: {{ ansible_host }}
+              Error: WinRM connection failed - Check credentials and WinRM service

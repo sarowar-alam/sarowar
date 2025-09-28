@@ -1,0 +1,115 @@
+---
+- name: Ensure required software on Ubuntu servers
+  hosts: ubuntu_servers
+  become: true
+  tasks:
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+
+    - name: Install essential packages
+      apt:
+        name:
+          - git
+          - docker.io
+          - net-tools
+          - unzip
+        state: latest
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+
+    - name: Install AWS CLI v2 - Download installer
+      get_url:
+        url: https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
+        dest: /tmp/awscliv2.zip
+
+    - name: Install AWS CLI v2 - Unzip installer
+      unarchive:
+        src: /tmp/awscliv2.zip
+        dest: /tmp
+        remote_src: yes
+
+    - name: Install AWS CLI v2
+      shell: /tmp/aws/install --update
+      args:
+        creates: /usr/local/bin/aws
+
+    - name: Clean up AWS installer files
+      file:
+        path: /tmp/awscliv2.zip
+        state: absent
+
+    - name: Clean up AWS installer directory
+      file:
+        path: /tmp/aws
+        state: absent
+
+    - name: Verify installed software versions
+      shell: |
+        echo "AWS CLI: $(aws --version 2>&1)"
+        echo "Git: $(git --version)"
+        echo "Docker: $(docker --version)"
+        echo "Netstat: $(netstat --version || echo 'net-tools installed')"
+      register: ubuntu_software_versions
+
+    - name: Save Ubuntu software versions to log
+      copy:
+        content: "{{ ubuntu_software_versions.stdout }}"
+        dest: "~/ubuntu_software_versions.log"
+
+    - name: Show Ubuntu software versions
+      debug:
+        var: ubuntu_software_versions.stdout_lines
+
+- name: Ensure required software on Windows servers
+  hosts: windows_servers
+  become: false
+  tasks:
+
+    - name: Ensure log directory exists
+      win_file:
+        path: C:\ansible_logs
+        state: directory
+
+    - name: Ensure Chocolatey is installed
+      win_chocolatey:
+        name: chocolatey
+        state: present
+
+    - name: Install AWS CLI
+      win_chocolatey:
+        name: awscli
+        state: present
+
+    - name: Install Git Bash
+      win_chocolatey:
+        name: git
+        state: present
+
+    - name: Install Python
+      win_chocolatey:
+        name: python
+        state: present
+
+    - name: Verify installed software versions
+      win_shell: |
+        $aws = (aws --version 2>&1 | Out-String).Trim()
+        $git = (git --version 2>&1 | Out-String).Trim()
+        $python = (python --version 2>&1 | Out-String).Trim()
+        "$aws`n$git`n$python"
+      register: windows_software_versions
+      ignore_errors: yes
+
+    - name: Save Windows software versions to log
+      win_copy:
+        content: "{{ windows_software_versions.stdout | default('Not found') }}"
+        dest: C:\ansible_logs\windows_software_versions.log
+
+    - name: Show Windows software versions
+      debug:
+        var: windows_software_versions.stdout_lines
+

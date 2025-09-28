@@ -1,0 +1,40 @@
+Step 1: Prepare the Ansible Master Node (Ubuntu)
+Run these steps on your Ubuntu server that will act as the Ansible master.
+# Update system
+sudo apt update && sudo apt upgrade -y
+
+# Install Ansible, Python, and required tools
+sudo apt install -y ansible python3-pip python3-venv sshpass
+
+# (Optional but recommended) create a virtual environment
+python3 -m venv ~/ansible-venv
+source ~/ansible-venv/bin/activate
+pip install --upgrade pip
+pip install pywinrm boto3 botocore
+
+# Verify ansible
+ansible --version
+
+Step 2: Setup Access to Managed Ubuntu Servers
+1.	Copy your private key (e.g. ~/.ssh/my-key.pem) to the Ansible master.
+2.	chmod 600 ~/.ssh/my-key.pem
+3.	Test SSH to your managed servers:
+4.	ssh -i ~/.ssh/my-key.pem ubuntu@<UBUNTU_SERVER_IP>
+If you can SSH without a password, you’re good.
+
+Step 3: Setup Access to Windows Server
+	1.	On the Windows Server, enable WinRM for Ansible:
+	Run PowerShell as Administrator:
+	winrm quickconfig
+	winrm set winrm/config/service/auth '@{Basic="true"}'
+	winrm set winrm/config/service '@{AllowUnencrypted="true"}'
+
+Step 4 : Install Required Collections
+On your Ansible master node, run:
+ansible-galaxy collection install ansible.windows
+ansible-galaxy collection install community.windows
+Then verify:
+ansible-galaxy collection list | grep windows
+You should see something like:
+ansible.windows    x.y.z
+community.windows  x.y.z

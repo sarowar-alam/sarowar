@@ -1,0 +1,82 @@
+---
+- name: Update Ubuntu servers
+  hosts: ubuntu_servers
+  become: true
+  tasks:
+    - name: Gather package list before upgrade
+      shell: dpkg -l
+      register: ubuntu_packages_before
+
+    - name: Save package list before upgrade
+      copy:
+        content: "{{ ubuntu_packages_before.stdout }}"
+        dest: "~/{{ inventory_hostname }}-packages-before.txt"
+
+    - name: Clean apt cache (fix GPG/lock issues)
+      shell: apt-get clean
+      changed_when: false
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+
+    - name: Upgrade packages
+      apt:
+        upgrade: dist
+        autoremove: yes
+        autoclean: yes
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+      register: ubuntu_upgrade_result
+
+    - name: Gather package list after upgrade
+      shell: dpkg -l
+      register: ubuntu_packages_after
+
+    - name: Save package list after upgrade
+      copy:
+        content: "{{ ubuntu_packages_after.stdout }}"
+        dest: "~/{{ inventory_hostname }}-packages-after.txt"
+
+    - name: Save Ubuntu upgrade summary
+      copy:
+        content: "{{ ubuntu_upgrade_result | to_nice_json }}"
+        dest: "~/{{ inventory_hostname }}-updates.json"
+
+- name: Update Windows servers
+  hosts: windows_servers
+  become: false
+  tasks:
+    - name: Gather installed software via registry
+      win_shell: |
+        Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* |
+        Select-Object DisplayName, DisplayVersion, Publisher, InstallDate |
+        ConvertTo-Json -Compress
+      register: installed_software
+
+    - name: Ensure log directory exists
+      win_file:
+        path: C:\ansible_logs
+        state: directory
+
+    - name: Save software list (raw JSON, no escape parsing)
+      copy:
+        content: "{{ installed_software.stdout | string }}"
+        dest: "C:/ansible_logs/{{ inventory_hostname }}-packages.json"
+
+    - name: Install all available updates
+      win_updates:
+        # category_names:
+        #   - SecurityUpdates
+        #   - CriticalUpdates
+        reboot: yes
+      register: win_update_result
+
+    - name: Save Windows updates log
+      copy:
+        content: "{{ win_update_result | to_nice_json }}"
+        dest: "C:/ansible_logs/{{ inventory_hostname }}-updates.json"
+
