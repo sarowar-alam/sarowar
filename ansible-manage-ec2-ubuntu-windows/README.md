@@ -71,7 +71,7 @@ ubuntu_servers:
     ubuntu1:
       ansible_host: 10.0.134.174
       ansible_user: ubuntu
-      ansible_ssh_private_key_file: ~/.ssh/ostad_ostad.pem
+      ansible_ssh_private_key_file: ~/.ssh/your_key_pair_name.pem
 ```
 
 **Windows Servers**
@@ -137,7 +137,7 @@ ansible-playbook -i inventory/hosts.yml playbooks/update-systems.yml
 
 ## Notes
 
-- Make sure your **PEM keys** have correct permissions: `chmod 600 ~/.ssh/ostad_ostad.pem`  
+- Make sure your **PEM keys** have correct permissions: `chmod 600 ~/.ssh/your_key_pair_name.pem`  
 - Ensure **WinRM is configured** on Windows servers:  
 ```powershell
 winrm quickconfig
