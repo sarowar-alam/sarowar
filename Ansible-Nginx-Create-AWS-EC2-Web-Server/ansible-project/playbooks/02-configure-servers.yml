@@ -5,7 +5,7 @@
   become: true
   vars:
     aws_region: ap-south-1
-    project_name: ansible-ostad
+    project_name: ansible-company_name
 
   tasks:
     - name: Check if we can connect

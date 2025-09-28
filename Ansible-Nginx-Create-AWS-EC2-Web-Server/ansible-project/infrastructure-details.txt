@@ -1,12 +1,12 @@
 # AWS Infrastructure Details
-Project: ansible-ostad
+Project: ansible-company_name
 Created: 2025-09-27T14:25:13+00:00
 Region: ap-south-1
 AMI: ami-02d26659fd82cf299
 
 # Key Pair
-Key Name: sarowar_ostad
-Key File: /root/sarowar_ostad.pem
+Key Name: your_key_pair_name
+Key File: /root/your_key_pair_name.pem
 
 # VPC
 VPC ID: vpc-0ba6ae014cb9d85e5
@@ -14,9 +14,9 @@ VPC CIDR: 10.0.0.0/16
 
 # Instances
 Web Server:
-  Name: ansible-ostad-web-01
+  Name: ansible-company_name-web-01
   Public IP: 13.233.231.240
-  SSH: ssh -i /root/sarowar_ostad.pem ubuntu@13.233.231.240
+  SSH: ssh -i /root/your_key_pair_name.pem ubuntu@13.233.231.240
 
 # Security Group
 Web Security Group: sg-073bec668e9ae63fa

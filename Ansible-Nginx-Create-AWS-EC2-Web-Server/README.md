@@ -113,10 +113,10 @@ After deployment, details will be saved in:
 
 Example:
 ```
-Project: ansible-ostad
+Project: ansible-company_name
 Region: ap-south-1
 Web Server Public IP: 3.109.xxx.xxx
-SSH: ssh -i /root/sarowar_ostad.pem ubuntu@3.109.xxx.xxx
+SSH: ssh -i /root/your_key_pair_name.pem ubuntu@3.109.xxx.xxx
 ```
 
 ---
@@ -133,6 +133,6 @@ SSH: ssh -i /root/sarowar_ostad.pem ubuntu@3.109.xxx.xxx
 
 ## 📧 Contact
 
-Maintainer: **Sarowar**  
-Email: sarowar@ostad.com  
-Project: `ansible-ostad`
+Maintainer: **user_name**  
+Email: user_name@company_name.com  
+Project: `ansible-company_name`

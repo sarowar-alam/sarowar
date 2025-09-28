@@ -15,4 +15,4 @@ filters:
 compose:
   ansible_host: public_ip_address
   ansible_user: ubuntu
-  ansible_ssh_private_key_file: /root/sarowar_ostad.pem
+  ansible_ssh_private_key_file: /root/your_key_pair_name.pem
