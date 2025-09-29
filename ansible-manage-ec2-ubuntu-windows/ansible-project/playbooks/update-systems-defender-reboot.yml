@@ -4,7 +4,7 @@
   become: true
   tasks:
     - name: Gather package list before upgrade
-      shell: dpkg -l
+      command: dpkg -l
       register: ubuntu_packages_before
 
     - name: Save package list before upgrade
@@ -13,7 +13,7 @@
         dest: "~/{{ inventory_hostname }}-packages-before.txt"
 
     - name: Clean apt cache (fix GPG/lock issues)
-      shell: apt-get clean
+      command: apt-get clean
       changed_when: false
 
     - name: Update apt cache
@@ -32,8 +32,12 @@
         DEBIAN_FRONTEND: noninteractive
       register: ubuntu_upgrade_result
 
+    - name: Show Ubuntu updates summary in console
+      debug:
+        var: ubuntu_upgrade_result
+
     - name: Gather package list after upgrade
-      shell: dpkg -l
+      command: dpkg -l
       register: ubuntu_packages_after
 
     - name: Save package list after upgrade
@@ -82,24 +86,26 @@
         reboot: yes
       register: win_update_result
 
+    - name: Show Windows updates summary in console
+      debug:
+        var: win_update_result
+
     - name: Save Windows updates log
       copy:
         content: "{{ win_update_result | to_nice_json }}"
         dest: "C:/ansible_logs/{{ inventory_hostname }}-updates.json"
 
-    - name: Force Microsoft Defender Antivirus update
+    - name: Update Microsoft Defender signatures
       win_shell: |
-        "%ProgramFiles%\Windows Defender\MpCmdRun.exe" -SignatureUpdate
+        Update-MpSignature
       register: defender_update
+      failed_when: defender_update.rc not in [0,1]
+
+    - name: Show Defender update result in console
+      debug:
+        var: defender_update.stdout
 
     - name: Save Defender update result
       copy:
         content: "{{ defender_update.stdout }}"
         dest: "C:/ansible_logs/{{ inventory_hostname }}-defender-update.log"
-
-    - name: Force reboot Windows server after updates
-      win_reboot:
-        msg: "System is rebooting after updates"
-        pre_reboot_delay: 0
-        post_reboot_delay: 30
-        reboot_timeout: 1200

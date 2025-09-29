@@ -38,3 +38,19 @@ ansible-galaxy collection list | grep windows
 You should see something like:
 ansible.windows    x.y.z
 community.windows  x.y.z
+
+
+# Get-CimInstance Win32_QuickFixEngineering | Select-Object HotFixID, Description, InstalledOn
+
+Windows PowerShell
+Copyright (C) Microsoft Corporation. All rights reserved.
+
+Install the latest PowerShell for new features and improvements! https://aka.ms/PSWindows
+
+PS C:\Windows\system32> Get-CimInstance Win32_QuickFixEngineering | Select-Object HotFixID, Description, InstalledOn
+
+HotFixID  Description     InstalledOn
+--------  -----------     -----------
+KB5064401 Update          9/11/2025 12:00:00 AM
+KB5065426 Security Update 9/11/2025 12:00:00 AM
+KB5064531 Update          9/11/2025 12:00:00 AM
