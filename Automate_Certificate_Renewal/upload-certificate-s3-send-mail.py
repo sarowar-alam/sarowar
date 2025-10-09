@@ -86,7 +86,7 @@ DevOps Team
         'Data': f"""
         <html>
             <body>
-                <p>Hello Team,</p>
+                <p>Hello Team ...,</p>
                 <p>The updated certificate for domain <strong>{domain}</strong> is now available at the secure link below:</p>
                 <p><a href="{pre_signed_url}">Download {domain} Certificate</a></p>
                 <p>This link will expire in 7 days.</p>
