@@ -124,7 +124,7 @@ All are archived by `archiveArtifacts artifacts: 'trivy-report.*'` and available
 - Example values for a build:
   - `branch`: `main`
   - `git_url`: `git@github.com:your-org/your-repo.git`
-  - `dockerfile_path`: `ImageService` (if Dockerfile is at `ImageService/Dockerfile`)
+  - `dockerfile_path`: `YourServiceName` (if Dockerfile is at `YourServiceName/Dockerfile`)
   - `image_name`: `myorg-image-service`
   - `build_method`: `dockerfile_in_path`
   - `build_context_path`: `.`

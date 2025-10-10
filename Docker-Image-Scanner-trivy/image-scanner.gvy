@@ -4,13 +4,13 @@ pipeline {
     parameters {
         string(name: 'branch', defaultValue: 'ReleaseCandidate', description: 'Git branch')
         string(name: 'git_url', defaultValue: 'git@github.com:my-git-hub/my-git-repo.git', description: 'Git URL')
-        string(name: 'dockerfile_path', defaultValue: '.', description: 'Dockerfile path If you require ImageService/Dockerfile then Put ImageService Only ...')
+        string(name: 'dockerfile_path', defaultValue: '.', description: 'Dockerfile path If you require YourServiceName/Dockerfile then Put YourServiceName Only ...')
 
-        string(name: 'image_name', defaultValue: 'xbox-rc-image-service', description: 'Image name, nust be all small letters. ')
+        string(name: 'image_name', defaultValue: 'your-org-service-name', description: 'Image name, nust be all small letters. ')
         choice(
             name: 'build_method',
             choices: ['dockerfile_in_path', 'root_dockerfile'],
-            description: 'How to build: dockerfile_in_path uses -f ImageService/Dockerfile, root_dockerfile uses -f Dockerfile'
+            description: 'How to build: dockerfile_in_path uses -f YourServiceName/Dockerfile, root_dockerfile uses -f Dockerfile'
         )
         string(name: 'build_context_path', defaultValue: '.', description: 'Build Context Path !')
     }
