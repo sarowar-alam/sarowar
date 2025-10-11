@@ -1,7 +1,9 @@
+# nginx\nginx-service.yaml
 apiVersion: v1
 kind: Service
 metadata:
   name: nginx-service
+  namespace: nginx-demo
 spec:
   selector:
     app: nginx
