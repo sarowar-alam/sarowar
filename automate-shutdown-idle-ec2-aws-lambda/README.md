@@ -27,7 +27,7 @@ Security & safety notes
 
 - AWS CLI v2 configured with credentials that can create IAM roles and deploy Lambda (or use the Console).
 - PowerShell (Windows PowerShell v5.1 or PowerShell Core) as your shell for commands below.
-- Python 3.9+ (for local tests or packaging). Lambda uses Python 3.9 runtime in these examples.
+- Python 3.12+ (for local tests or packaging). Lambda uses Python 3.12 runtime in these examples.
 - Target EC2 instances must be tagged: `Environment=Mainline` and `System=XBOX` (or change the tag JSON).
 
 ---
@@ -195,7 +195,7 @@ $ACCOUNT_ID = (aws sts get-caller-identity --query Account --output text)
 
 aws lambda create-function `
   --function-name ec2-auto-shutdown `
-  --runtime python3.9 `
+  --runtime python3.12 `
   --role arn:aws:iam::${ACCOUNT_ID}:role/EC2AutoShutdownLambdaRole `
   --handler lambda_function.lambda_handler `
   --zip-file fileb://lambda-function.zip `
