@@ -1,0 +1,53 @@
+{
+	"Version": "2012-10-17",
+	"Statement": [
+		{
+			"Effect": "Allow",
+			"Action": [
+				"ec2:StartInstances",
+				"ec2:StopInstances",
+				"ec2:CreateImage"
+			],
+			"Resource": "arn:aws:ec2:*:YOUR_ACCOUNT_ID:instance/*",
+			"Condition": {
+				"StringEqualsIgnoreCase": {
+					"aws:ResourceTag/Environment": "Mainline",
+					"aws:ResourceTag/System": "YOUR_SYSTEM"
+				}
+			}
+		},
+		{
+			"Effect": "Allow",
+			"Action": [
+				"ec2:DescribeInstances",
+				"ec2:DescribeInstanceStatus",
+				"ec2:DescribeImages",
+				"ec2:DescribeTags",
+				"ec2:DescribeSnapshots",
+				"ec2:DescribeRegions",
+				"ec2:DescribeVolumes",
+				"ec2:DescribeInstances",
+				"cloudwatch:GetMetricStatistics"
+			],
+			"Resource": "*"
+		},
+		{
+			"Sid": "AMIManagement",
+			"Effect": "Allow",
+			"Action": [
+				"ec2:CreateImage",
+				"ec2:CreateTags",
+				"ec2:DeregisterImage",
+				"ec2:CreateSnapshot",
+				"ec2:DeleteSnapshot",
+				"ec2:DescribeImages",
+				"ec2:DescribeTags",
+				"ec2:DescribeSnapshots"
+			],
+			"Resource": [
+				"arn:aws:ec2:*::image/*",
+				"arn:aws:ec2:*::snapshot/*"
+			]
+		}
+	]
+}
