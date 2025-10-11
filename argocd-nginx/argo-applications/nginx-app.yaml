@@ -1,4 +1,4 @@
-# argo-applications/nginx-app.yaml
+# argocd-nginx\argo-applications\nginx-app.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -7,9 +7,9 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/sarowar-alam/sarowar.git  # ← UPDATE THIS
+    repoURL: https://github.com/sarowar-alam/sarowar.git
     targetRevision: main
-    path: nginx  # ← CHANGED from kubernetes/nginx to nginx
+    path: argocd-nginx/nginx  # ← FIXED: Changed from "nginx" to "argocd-nginx/nginx"
   destination:
     server: https://kubernetes.default.svc
     namespace: nginx-demo
