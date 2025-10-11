@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: nginx
-        image: sarowaralam/sarowar-nginx-02
+        image: sarowaralam/sarowar-nginx-01
         ports:
         - containerPort: 80
         resources:
