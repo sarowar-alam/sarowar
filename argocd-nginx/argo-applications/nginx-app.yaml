@@ -1,4 +1,4 @@
-# argocd-nginx/argo-applications/nginx-app-auto.yaml
+# argocd-nginx/argo-applications/nginx-app.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -7,6 +7,8 @@ metadata:
   annotations:
     # This ensures immediate refresh when changes are detected
     argocd.argoproj.io/refresh-type: hard
+    # Add revision history limit annotation
+    argocd.argoproj.io/revision-history-limit: "3"
 spec:
   project: default
   source:
@@ -30,3 +32,4 @@ spec:
     syncOptions:
     - CreateNamespace=true
     - ApplyOutOfSyncOnly=true
+    - PruneLast=true
