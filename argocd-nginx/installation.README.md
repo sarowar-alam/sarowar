@@ -78,3 +78,12 @@ argocd app get nginx-demo
 argocd app sync nginx-demo
 # Check resources
 kubectl -n nginx-demo get all
+
+# To forward the nginx service to localhost port 8082, use this command:
+kubectl port-forward -n nginx-demo service/nginx-service 8082:80
+#                │              │            │            │    │
+#                │              │            │            │    └── Service port (80)
+#                │              │            │            └─── Local port (8082)
+#                │              │            └─── Service name
+#                │              └─── Namespace
+#                └─── Port-forward command
