@@ -20,7 +20,6 @@ spec:
     metadata:
       labels:
         app: secure-app
-      # 🎯 AppArmor annotation REMOVED - this was causing the issue
     spec:
       serviceAccountName: secure-app-sa
       securityContext:
@@ -63,9 +62,17 @@ spec:
           capabilities:
             drop:
             - ALL
-          readOnlyRootFilesystem: true
+          readOnlyRootFilesystem: true  # Keep this for security
           runAsNonRoot: true
           runAsUser: 1000
+        # ADD THESE VOLUME MOUNTS:
+        volumeMounts:
+        - name: nginx-cache
+          mountPath: /var/cache/nginx
+        - name: nginx-tmp
+          mountPath: /tmp
+        - name: nginx-run
+          mountPath: /var/run
         livenessProbe:
           httpGet:
             path: /health
@@ -85,6 +92,14 @@ spec:
           timeoutSeconds: 3
           failureThreshold: 3
         imagePullPolicy: IfNotPresent
+      # ADD THESE VOLUMES:
+      volumes:
+      - name: nginx-cache
+        emptyDir: {}
+      - name: nginx-tmp
+        emptyDir: {}
+      - name: nginx-run
+        emptyDir: {}
       restartPolicy: Always
       nodeSelector:
         dedicated: secure-workloads
