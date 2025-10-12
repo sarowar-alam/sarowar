@@ -14,7 +14,7 @@ metadata:
 
 # Specification section - defines the desired state of the deployment
 spec:
-  replicas: 3                # Number of pod replicas to maintain (3 identical nginx pods)
+  replicas: 2                # Number of pod replicas to maintain (3 identical nginx pods)
   
   # Selector - tells the deployment how to find which pods to manage
   selector:
