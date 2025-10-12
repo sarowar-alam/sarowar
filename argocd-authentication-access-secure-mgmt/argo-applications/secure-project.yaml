@@ -19,18 +19,22 @@ spec:
   - namespace: "*-demo"
     server: https://kubernetes.default.svc
   
-  # Cluster resource allowlist
+  # Cluster resource allowlist - ADD MISSING RESOURCES HERE
   clusterResourceWhitelist:
   - group: ""
     kind: Namespace
   - group: ""
     kind: Secret
+  - group: ""
+    kind: ServiceAccount  # ADD THIS
   - group: "apps"
     kind: Deployment
   - group: ""
     kind: Service
   - group: "networking.k8s.io"
     kind: Ingress
+  - group: "networking.k8s.io"
+    kind: NetworkPolicy  # ADD THIS
   - group: "rbac.authorization.k8s.io"
     kind: Role
   - group: "rbac.authorization.k8s.io"
@@ -39,43 +43,32 @@ spec:
     kind: ClusterRole
   - group: "rbac.authorization.k8s.io"
     kind: ClusterRoleBinding
+  - group: "bitnami.com"  # ADD THIS for SealedSecret
+    kind: SealedSecret
+  - group: "external-secrets.io"  # ADD THIS for ExternalSecret
+    kind: ExternalSecret
   
-  # Namespace resource allowlist
+  # Namespace resource allowlist - ADD MISSING RESOURCES HERE
   namespaceResourceWhitelist:
   - group: ""
     kind: Secret
+  - group: ""
+    kind: ServiceAccount  # ADD THIS
   - group: "apps"
     kind: Deployment
   - group: ""
     kind: Service
   - group: "networking.k8s.io"
     kind: Ingress
+  - group: "networking.k8s.io"
+    kind: NetworkPolicy  # ADD THIS
   - group: "rbac.authorization.k8s.io"
     kind: Role
   - group: "rbac.authorization.k8s.io"
     kind: RoleBinding
-  
-  # Roles for access control
-  roles:
-  - name: read-only
-    description: Read-only access
-    policies:
-    - p, proj:secure-project:read-only, applications, get, secure-project/*, allow
-    groups:
-    - read-only-users
-  
-  - name: developer
-    description: Developer access with sync permissions
-    policies:
-    - p, proj:secure-project:developer, applications, get, secure-project/*, allow
-    - p, proj:secure-project:developer, applications, sync, secure-project/*, allow
-    groups:
-    - developers
-  
-  - name: admin
-    description: Full administrative access
-    policies:
-    - p, proj:secure-project:admin, applications, *, secure-project/*, allow
-    - p, proj:secure-project:admin, applications, *, secure-project/*, allow
-    groups:
-    - argo-admins
+  - group: "bitnami.com"  # ADD THIS
+    kind: SealedSecret
+  - group: "external-secrets.io"  # ADD THIS
+    kind: ExternalSecret
+
+  # ... rest of your configuration (roles, etc)

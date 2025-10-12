@@ -20,7 +20,7 @@ spec:
     metadata:
       labels:
         app: secure-app
-      # REMOVED AppArmor annotations
+      # 🎯 AppArmor annotation REMOVED - this was causing the issue
     spec:
       serviceAccountName: secure-app-sa
       securityContext:
