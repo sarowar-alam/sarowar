@@ -10,13 +10,13 @@ metadata:
   # AWS region where cluster will be deployed
   region: ap-south-1
   # Kubernetes version for the cluster
-  version: "1.33"
+  version: "1.34"
   # Tags for resource identification and cost tracking
   tags:
     # Project identifier tag
     Project: argo-cd-ostad
     # Environment classification tag
-    Environment: Test
+    Environment: Test-Class
     # Class date identifier tag
     ClassDate: 12thOctober2025
 
