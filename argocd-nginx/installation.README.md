@@ -87,3 +87,15 @@ kubectl port-forward -n nginx-demo service/nginx-service 8082:80
 #                │              │            └─── Service name
 #                │              └─── Namespace
 #                └─── Port-forward command
+
+
+# Test the GitOps Flow:
+# Try making a small change to test the automation:
+# yaml
+# In nginx-deployment.yaml - change replicas from 2 to 3
+spec:
+  replicas: 3
+# Git 
+git add .
+git commit -m "test: scale to 3 replicas"
+git push origin main
