@@ -1,7 +1,7 @@
 # Get current directory
 $currentDir = Get-Location
 $outputFile = "combined_files.txt"
-$extensions = @("*.yaml", "*.txt"  )
+$extensions = @("*.yaml", "*.md"  )
 
 if (Test-Path $outputFile) {
     Remove-Item $outputFile
