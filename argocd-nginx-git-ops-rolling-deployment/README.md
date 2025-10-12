@@ -133,7 +133,7 @@ git push origin main
 **Md. Sarowar Alam**  
 Cloud & DevOps Engineer  
 📧 Email: sarowar@hotmail.com  
-🔗 LinkedIn: [linkedin.com/in/sarowar-alam](https://linkedin.com/in/sarowar-alam)
+🔗 LinkedIn: [linkedin.com/in/sarowar](https://www.linkedin.com/in/sarowar/)
 
 ---
 
