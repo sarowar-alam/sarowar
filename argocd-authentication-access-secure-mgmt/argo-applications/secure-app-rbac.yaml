@@ -1,0 +1,39 @@
+# argocd-nginx/argo-applications/secure-app-rbac.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: secure-app-demo
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/refresh-type: hard
+    argocd.argoproj.io/revision-history-limit: "3"
+    notifications.argoproj.io/subscribe.on-sync-succeeded.slack: secure-app-channel
+spec:
+  project: secure-project  # Using custom project for better access control
+  source:
+    repoURL: https://github.com/your-repo-name-alam/your-repo-name.git
+    targetRevision: main
+    path: argocd-nginx/secure-app
+    # Add helm values for secret management (if using helm)
+    # helm:
+    #   valueFiles:
+    #   - values-secrets.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: secure-app-demo
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+    - CreateNamespace=true
+    - ApplyOutOfSyncOnly=true
+    - PruneLast=true
+    - Validate=true  # Add validation

@@ -1,0 +1,35 @@
+# secure-app/rbac-setup.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: secure-app-demo
+  name: secure-app-role
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: secure-app-rolebinding
+  namespace: secure-app-demo
+subjects:
+- kind: ServiceAccount
+  name: secure-app-sa
+  namespace: secure-app-demo
+roleRef:
+  kind: Role
+  name: secure-app-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: secure-app-sa
+  namespace: secure-app-demo
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::YOUR_AWS_ACCOUNT:role/secure-app-role

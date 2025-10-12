@@ -1,0 +1,91 @@
+# argocd-nginx/argo-applications/secure-project.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: secure-project
+  namespace: argocd
+spec:
+  description: "Secure application project with RBAC and secret management"
+  
+  # Source repositories allowed
+  sourceRepos:
+  - https://github.com/your-repo-name-alam/your-repo-name.git
+  - "*"
+  
+  # Destinations allowed
+  destinations:
+  - namespace: secure-app-demo
+    server: https://kubernetes.default.svc
+  - namespace: "*-demo"
+    server: https://kubernetes.default.svc
+  
+  # Cluster resource allowlist
+  clusterResourceWhitelist:
+  - group: ""
+    kind: Namespace
+  - group: ""
+    kind: Secret
+  - group: "apps"
+    kind: Deployment
+  - group: ""
+    kind: Service
+  - group: "networking.k8s.io"
+    kind: Ingress
+  - group: "rbac.authorization.k8s.io"
+    kind: Role
+  - group: "rbac.authorization.k8s.io"
+    kind: RoleBinding
+  - group: "rbac.authorization.k8s.io"
+    kind: ClusterRole
+  - group: "rbac.authorization.k8s.io"
+    kind: ClusterRoleBinding
+  
+  # Namespace resource allowlist
+  namespaceResourceWhitelist:
+  - group: ""
+    kind: Secret
+  - group: "apps"
+    kind: Deployment
+  - group: ""
+    kind: Service
+  - group: "networking.k8s.io"
+    kind: Ingress
+  - group: "rbac.authorization.k8s.io"
+    kind: Role
+  - group: "rbac.authorization.k8s.io"
+    kind: RoleBinding
+  
+  # Roles for access control
+  roles:
+  - name: read-only
+    description: Read-only access
+    policies:
+    - p, proj:secure-project:read-only, applications, get, secure-project/*, allow
+    groups:
+    - read-only-users
+  
+  - name: developer
+    description: Developer access with sync permissions
+    policies:
+    - p, proj:secure-project:developer, applications, get, secure-project/*, allow
+    - p, proj:secure-project:developer, applications, sync, secure-project/*, allow
+    groups:
+    - developers
+  
+  - name: admin
+    description: Full administrative access
+    policies:
+    - p, proj:secure-project:admin, applications, *, secure-project/*, allow
+    - p, proj:secure-project:admin, applications, *, secure-project/*, allow
+    groups:
+    - argo-admins
+  
+  # Sync windows (optional - for maintenance windows)
+  syncWindows:
+  - kind: allow
+    schedule: "0 2 * * *"
+    duration: 1h
+    applications:
+    - "*-demo"
+    namespaces:
+    - "secure-app-demo"

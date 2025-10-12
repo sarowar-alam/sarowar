@@ -1,0 +1,17 @@
+# secure-app/service-secure.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: secure-app-service
+  namespace: secure-app-demo
+  annotations:
+    # Network policy annotations
+    networking.k8s.io/allow-access: "restricted"
+spec:
+  selector:
+    app: secure-app
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+  type: ClusterIP

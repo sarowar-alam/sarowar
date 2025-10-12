@@ -1,0 +1,21 @@
+# secure-app/ingress-secure.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: secure-app-ingress
+  namespace: secure-app-demo
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: secure-app.demo.com  # Change to your domain
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: secure-app-service
+            port:
+              number: 8080

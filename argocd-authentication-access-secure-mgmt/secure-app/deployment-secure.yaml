@@ -1,0 +1,99 @@
+# secure-app/deployment-secure.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: secure-app-deployment
+  namespace: secure-app-demo
+  labels:
+    app: secure-app
+    security-tier: high
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: secure-app
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: secure-app
+      annotations:
+        # Security context annotations
+        container.apparmor.security.beta.kubernetes.io/secure-app: runtime/default
+    spec:
+      serviceAccountName: secure-app-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 3000
+        fsGroup: 2000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: secure-app
+        image: sarowaralam/sarowar-nginx-03
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: database-url
+        - name: API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: api-key
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: jwt-secret
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        imagePullPolicy: IfNotPresent
+      restartPolicy: Always
+      # Add node selector for security
+      nodeSelector:
+        dedicated: secure-workloads
+      tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "secure-workloads"
+        effect: "NoSchedule"

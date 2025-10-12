@@ -1,0 +1,70 @@
+# aws-cluster-secure-addon.yaml
+# This file adds secure node group to your existing cluster
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: argo-cd-class-12th
+  region: ap-south-1
+  version: "1.33"
+  tags:
+    Project: argo-cd-ostad
+    Environment: Test
+    ClassDate: 12thOctober2025
+
+iam:
+  withOIDC: true
+
+# Add security-related addons
+addons:
+- name: vpc-cni
+- name: aws-ebs-csi-driver
+- name: aws-efs-csi-driver  # Add EFS CSI driver for persistent storage
+
+# Add a new secure node group alongside your existing one
+managedNodeGroups:
+- name: argo-workers  # Your existing node group (keep as is)
+  instanceType: m7i.xlarge
+  desiredCapacity: 1
+  minSize: 1
+  maxSize: 2
+  amiFamily: AmazonLinux2023
+  iam:
+    withAddonPolicies:
+      ebs: true
+  volumeSize: 40
+  volumeType: gp3
+  ebsOptimized: true
+
+# NEW: Add secure node group for security-sensitive workloads
+- name: secure-workers
+  instanceType: m7i.xlarge
+  desiredCapacity: 1
+  minSize: 1
+  maxSize: 2
+  amiFamily: AmazonLinux2023
+  labels:
+    dedicated: secure-workloads
+    environment: secure
+    workload-type: security-sensitive
+  taints:
+  - key: "dedicated"
+    value: "secure-workloads"
+    effect: "NoSchedule"
+  iam:
+    withAddonPolicies:
+      ebs: true
+      autoScaling: true
+      awsLoadBalancer: true
+      externalDNS: true
+      certManager: true
+      efs: true  # Enable EFS policies
+  volumeSize: 50  # Slightly larger for secure workloads
+  volumeType: gp3
+  ebsOptimized: true
+  # Security enhancements
+  ssh:
+    allow: true
+    publicKeyPath: ~/.ssh/id_rsa.pub  # Update with your key path
+  privateNetworking: true
+  disableIMDSv1: true  # Disable IMDSv1 for better security

@@ -1,0 +1,529 @@
+argo-applications\secure-app-rbac.yaml
+# argocd-nginx/argo-applications/secure-app-rbac.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: secure-app-demo
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/refresh-type: hard
+    argocd.argoproj.io/revision-history-limit: "3"
+    notifications.argoproj.io/subscribe.on-sync-succeeded.slack: secure-app-channel
+spec:
+  project: secure-project  # Using custom project for better access control
+  source:
+    repoURL: https://github.com/your-repo-name-alam/your-repo-name.git
+    targetRevision: main
+    path: argocd-nginx/secure-app
+    # Add helm values for secret management (if using helm)
+    # helm:
+    #   valueFiles:
+    #   - values-secrets.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: secure-app-demo
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+    syncOptions:
+    - CreateNamespace=true
+    - ApplyOutOfSyncOnly=true
+    - PruneLast=true
+    - Validate=true  # Add validation
+
+
+argo-applications\secure-project.yaml
+# argocd-nginx/argo-applications/secure-project.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: secure-project
+  namespace: argocd
+spec:
+  description: "Secure application project with RBAC and secret management"
+  
+  # Source repositories allowed
+  sourceRepos:
+  - https://github.com/your-repo-name-alam/your-repo-name.git
+  - "*"
+  
+  # Destinations allowed
+  destinations:
+  - namespace: secure-app-demo
+    server: https://kubernetes.default.svc
+  - namespace: "*-demo"
+    server: https://kubernetes.default.svc
+  
+  # Cluster resource allowlist
+  clusterResourceWhitelist:
+  - group: ""
+    kind: Namespace
+  - group: ""
+    kind: Secret
+  - group: "apps"
+    kind: Deployment
+  - group: ""
+    kind: Service
+  - group: "networking.k8s.io"
+    kind: Ingress
+  - group: "rbac.authorization.k8s.io"
+    kind: Role
+  - group: "rbac.authorization.k8s.io"
+    kind: RoleBinding
+  - group: "rbac.authorization.k8s.io"
+    kind: ClusterRole
+  - group: "rbac.authorization.k8s.io"
+    kind: ClusterRoleBinding
+  
+  # Namespace resource allowlist
+  namespaceResourceWhitelist:
+  - group: ""
+    kind: Secret
+  - group: "apps"
+    kind: Deployment
+  - group: ""
+    kind: Service
+  - group: "networking.k8s.io"
+    kind: Ingress
+  - group: "rbac.authorization.k8s.io"
+    kind: Role
+  - group: "rbac.authorization.k8s.io"
+    kind: RoleBinding
+  
+  # Roles for access control
+  roles:
+  - name: read-only
+    description: Read-only access
+    policies:
+    - p, proj:secure-project:read-only, applications, get, secure-project/*, allow
+    groups:
+    - read-only-users
+  
+  - name: developer
+    description: Developer access with sync permissions
+    policies:
+    - p, proj:secure-project:developer, applications, get, secure-project/*, allow
+    - p, proj:secure-project:developer, applications, sync, secure-project/*, allow
+    groups:
+    - developers
+  
+  - name: admin
+    description: Full administrative access
+    policies:
+    - p, proj:secure-project:admin, applications, *, secure-project/*, allow
+    - p, proj:secure-project:admin, applications, *, secure-project/*, allow
+    groups:
+    - argo-admins
+  
+  # Sync windows (optional - for maintenance windows)
+  syncWindows:
+  - kind: allow
+    schedule: "0 2 * * *"
+    duration: 1h
+    applications:
+    - "*-demo"
+    namespaces:
+    - "secure-app-demo"
+
+
+secure-app\deployment-secure.yaml
+# secure-app/deployment-secure.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: secure-app-deployment
+  namespace: secure-app-demo
+  labels:
+    app: secure-app
+    security-tier: high
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: secure-app
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: secure-app
+      annotations:
+        # Security context annotations
+        container.apparmor.security.beta.kubernetes.io/secure-app: runtime/default
+    spec:
+      serviceAccountName: secure-app-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 3000
+        fsGroup: 2000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: secure-app
+        image: sarowaralam/sarowar-nginx-03
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: database-url
+        - name: API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: api-key
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: jwt-secret
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        imagePullPolicy: IfNotPresent
+      restartPolicy: Always
+      # Add node selector for security
+      nodeSelector:
+        dedicated: secure-workloads
+      tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "secure-workloads"
+        effect: "NoSchedule"
+
+
+secure-app\ingress-secure.yaml
+# secure-app/ingress-secure.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: secure-app-ingress
+  namespace: secure-app-demo
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: secure-app.demo.com  # Change to your domain
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: secure-app-service
+            port:
+              number: 8080
+
+
+secure-app\namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: secure-app-demo
+  labels:
+    environment: secure
+    app: secure-app
+
+
+secure-app\network-policy.yaml
+# secure-app/network-policy.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: secure-app-network-policy
+  namespace: secure-app-demo
+spec:
+  podSelector:
+    matchLabels:
+      app: secure-app
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: argocd
+    - podSelector:
+        matchLabels:
+          app: secure-app
+    ports:
+    - protocol: TCP
+      port: 8080
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9090
+  - to:
+    - ipBlock:
+        cidr: 10.0.0.0/8
+    ports:
+    - protocol: TCP
+      port: 5432
+
+
+secure-app\rbac-setup.yaml
+# secure-app/rbac-setup.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: secure-app-demo
+  name: secure-app-role
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: secure-app-rolebinding
+  namespace: secure-app-demo
+subjects:
+- kind: ServiceAccount
+  name: secure-app-sa
+  namespace: secure-app-demo
+roleRef:
+  kind: Role
+  name: secure-app-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: secure-app-sa
+  namespace: secure-app-demo
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::YOUR_AWS_ACCOUNT:role/secure-app-role
+
+
+secure-app\sealed-secret.yaml
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  annotations:
+    sealedsecrets.bitnami.com/cluster-wide: "true"
+  name: app-secrets
+  namespace: secure-app-demo
+spec:
+  encryptedData:
+    api-key: AgDF1sfNFG8Ofb+IEFAv+M+htgi2bV8v8ujUMyaG2PqbwBJTVB2n0wLpf3hF6FsuF+MJQu1lw/5SkiP26t3ro+Sari0qkiYeOd1raWdRkHQXY9rPts8hd0pqmc4k/b9vrGh5KAK0f4/bj+lp60Q+sJI/I9OrNG6WXjXMfyg1+fHDZtzEws32DTbmRpnWTixRbPhdcT5PTmFPMyT5nrpsvyfBfOU4Lfr8I2/X+bBv18nONswnmT7rMIFLo/jRY9MBhVy9Nr19R5MHezrImJsEz1a84ASLjZWe2hCN5LbirLsINJA9l4tnYpBAGdS4Kau988SS1jC9NbLXqOtDtOv/3XPIHW4H2CLSs8v1PqgDroOSWuQilN+R6YjUQJlRbAQ2toSYvrymykamYfMU/13I5ceBClt/kZLsCFtd9HnyBreAJ3X5eWR6rukucGC0ajj7DsTNnGvHW5BoCdHloLydqrP9h4M5EC9Ozx7Bxsb8CkKakvwSz7sQcn1pAeneBZlun0NLFDE+vR4+80zU7Dsc83K9cTG2vI18uq4GRhNtEcNfpZ8IH7zG2lrODuaz0qLa9mWJxorA7Nk/6wS/hkgSM9NCdLNEwb5AmK7Or+NCq+iud5bwhAdkqvVc1Kecps72vQC4Y20XpuLMWbTuW0sqwoIwwxM6IWFApgEyk7Inlvp7STAD7izKecHolzQIg3iynTC5u0cL6jCwq+tO+j3ImhCgd5pEjzPSYw==
+    database-url: AgAs5f2tnD+6JwwMTov4KoXHoRm/zVoYcjRob67oI4sOnejavnlxYXSnrjkIEunwxjr1aqiPXl6Y4YR790b+/LEIanEhdxk87/S++QK4UmdlsRKrEQ5AFkzULzSUrrkJ6TWJNnqDcaJsyuh7DRYca15dTc7t4X0vAcK98r8F3MQHm4ybd+BeUM5joj65czdx5RlDBYLlX9iToLM1ewAt4gOMk7djX82rroLAnXalTluXV4Rot4948BpzdTVq1o/jVyHWMVmYACdACaooGGFP4MOD9ivAckEk/cQ23Z3KX3fDSAfjujR6eaARv2vKaJ4VuHXzyTz9shjK7A6WpEySOfOtDuCaxup4kyrNYiDR/p7u5uTYiCQGTg04yieDyH3Iic24yTKU9HN42J31oqwh3GYGs2aE05DheeEjzG3lsfltU8K3PSV8dBa4Syarib8bgEp30plsh5M9Y7VV2WwFBCFApQotszmrjzu4zF1/VxqGzdzok7VG1ZAGfH6aRinjNyMWufvxo1VrbnFO/NQMIhIZAL2qP/nuXOro85wckcIP1M5VBGi+SJsVKlaOW6MSE8bi80MWIugURYq6iCd6vJh30D+9LqlO8O+ZZEy9cR2chLTHn9cCfYPy/z06pOU+618+qHlAxwmcBn5iqpRzHU7g7JuDJhRWh4TvyZ2n9KqGO41XWsRlDoxwRMsSI1xLwpyhMAPg5Kg4Wm1tAfC4HRj4bwZX1aTizHWgSKglpw==
+    jwt-secret: AgAnMb+bAK1p6lp6zkFvcjXZ5X5sGCd5xxaTngFYHwWsP5+26DfZDzW2H2pEK1dJ62/aQPHaAghrHgSwAhFR6eQRwlOfeevo1ITG4FZCMUjxe9GObE1gOOx8J5Ieo2obbRAjudbCVCdgWlgr7Ui0HvcPCa1+opZyMEN4X+KO4oX624/8eUuRMRvxfc90P91yLfUlWVgdu0GW41cmpXTJc7quzBwtYlZADXCvfgelxDgPTtsBEdF5OBjAl/5szGshSWE6T1OXeAYRzDUdsNaf8PIeyqYa+wSnaO70Vg9I8pia//LBoe1PXFJ7txAEdRgdRlqHOZbzYboD/8654fSNjxhDlTfNCvx3BtVp/5IZJYWlQtEzkFeLLWCrzhEtSD2PhhgLWln6lF4Nxwd4dwCMBs1wLBXgoQyFxTNKKDOOyZcHc0oPRqV+1RE6ARDCgFC2kuAv3XAcWNmPGmmAxzAV3N2qg9zWRhQjuhjZVATZWbSG0GOR4ohJw5CpapbnD97EoZ6RgKB8eGCWTwuviwXRBNoeLm9KlOwOsc03Rua89IOyhFrwsc8vS7lKWQMUpSFZdUwO95jxS7N6qkFJnkJAI284s0f60fsqF6o5a+DcLNTYkpZKYHy5OtmnOXoN9pgEULoNP//fa0Jf0MAmkQob0q3Fbk00HvspFVozJYVaSpo0nydYHyPTGbqvjnuuUATjtA05nHEobbs8YUUuw0+QMkB8cMDZAL55IdXXQ4G5yly1e9CGMeqCynFu+A==
+  template:
+    metadata:
+      annotations:
+        sealedsecrets.bitnami.com/cluster-wide: "true"
+      name: app-secrets
+      namespace: secure-app-demo
+
+
+
+secure-app\secret-management.yaml
+# secure-app/secret-management.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+  namespace: secure-app-demo
+  annotations:
+    # This tells Argo CD to ignore drift for this resource
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
+type: Opaque
+stringData:
+  # These can be managed externally or via SealedSecrets/ExternalSecrets
+  database-url: "postgresql://localhost:5432/secureapp"
+  api-key: "initial-key-will-be-replaced"
+  jwt-secret: "initial-jwt-secret"
+---
+# Example of using Kubernetes External Secrets (if installed)
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: aws-secrets
+  namespace: secure-app-demo
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-secret-store
+    kind: SecretStore
+  target:
+    name: aws-credentials
+    creationPolicy: Owner
+  data:
+  - secretKey: access-key
+    remoteRef:
+      key: production/secure-app
+      property: access-key
+  - secretKey: secret-key
+    remoteRef:
+      key: production/secure-app
+      property: secret-key
+
+
+secure-app\service-secure.yaml
+# secure-app/service-secure.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: secure-app-service
+  namespace: secure-app-demo
+  annotations:
+    # Network policy annotations
+    networking.k8s.io/allow-access: "restricted"
+spec:
+  selector:
+    app: secure-app
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+  type: ClusterIP
+
+
+argo-cd-rbac-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-rbac-cm
+  namespace: argocd
+data:
+  policy.csv: |
+    p, role:read-only, applications, get, */*, allow
+    p, role:developer, applications, get, */*, allow
+    p, role:developer, applications, sync, */*, allow
+    p, role:admin, applications, *, */*, allow
+    
+    g, read-only-users, role:read-only
+    g, developers, role:developer
+    g, argo-admins, role:admin
+    
+  scopes: '[groups, email]'
+
+
+aws-cluster-secure-addon.yaml
+# aws-cluster-secure-addon.yaml
+# This file adds secure node group to your existing cluster
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: argo-cd-class-12th
+  region: ap-south-1
+  version: "1.33"
+  tags:
+    Project: argo-cd-ostad
+    Environment: Test
+    ClassDate: 12thOctober2025
+
+iam:
+  withOIDC: true
+
+# Add security-related addons
+addons:
+- name: vpc-cni
+- name: aws-ebs-csi-driver
+- name: aws-efs-csi-driver  # Add EFS CSI driver for persistent storage
+
+# Add a new secure node group alongside your existing one
+managedNodeGroups:
+- name: argo-workers  # Your existing node group (keep as is)
+  instanceType: m7i.xlarge
+  desiredCapacity: 1
+  minSize: 1
+  maxSize: 2
+  amiFamily: AmazonLinux2023
+  iam:
+    withAddonPolicies:
+      ebs: true
+  volumeSize: 40
+  volumeType: gp3
+  ebsOptimized: true
+
+# NEW: Add secure node group for security-sensitive workloads
+- name: secure-workers
+  instanceType: m7i.xlarge
+  desiredCapacity: 1
+  minSize: 1
+  maxSize: 2
+  amiFamily: AmazonLinux2023
+  labels:
+    dedicated: secure-workloads
+    environment: secure
+    workload-type: security-sensitive
+  taints:
+  - key: "dedicated"
+    value: "secure-workloads"
+    effect: "NoSchedule"
+  iam:
+    withAddonPolicies:
+      ebs: true
+      autoScaling: true
+      awsLoadBalancer: true
+      externalDNS: true
+      certManager: true
+      efs: true  # Enable EFS policies
+  volumeSize: 50  # Slightly larger for secure workloads
+  volumeType: gp3
+  ebsOptimized: true
+  # Security enhancements
+  ssh:
+    allow: true
+    publicKeyPath: ~/.ssh/id_rsa.pub  # Update with your key path
+  privateNetworking: true
+  disableIMDSv1: true  # Disable IMDSv1 for better security
+
+
