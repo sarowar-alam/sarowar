@@ -11,7 +11,7 @@ metadata:
 spec:
   project: secure-project  # Using custom project for better access control
   source:
-    repoURL: https://github.com/your-repo-name-alam/your-repo-name.git
+    repoURL: https://github.com/sarowar-alam/sarowar.git
     targetRevision: main
     path: argocd-nginx/secure-app
     # Add helm values for secret management (if using helm)
