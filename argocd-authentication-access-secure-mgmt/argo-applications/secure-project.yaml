@@ -9,7 +9,7 @@ spec:
   
   # Source repositories allowed
   sourceRepos:
-  - https://github.com/your-repo-name-alam/your-repo-name.git
+  - https://github.com/sarowar-alam/sarowar.git
   - "*"
   
   # Destinations allowed
