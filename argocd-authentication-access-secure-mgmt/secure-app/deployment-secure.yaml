@@ -1,4 +1,3 @@
-# secure-app/deployment-secure.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -21,9 +20,7 @@ spec:
     metadata:
       labels:
         app: secure-app
-      annotations:
-        # Security context annotations
-        container.apparmor.security.beta.kubernetes.io/secure-app: runtime/default
+      # REMOVED AppArmor annotations
     spec:
       serviceAccountName: secure-app-sa
       securityContext:
@@ -89,7 +86,6 @@ spec:
           failureThreshold: 3
         imagePullPolicy: IfNotPresent
       restartPolicy: Always
-      # Add node selector for security
       nodeSelector:
         dedicated: secure-workloads
       tolerations:
