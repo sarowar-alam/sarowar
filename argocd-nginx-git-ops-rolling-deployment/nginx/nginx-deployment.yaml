@@ -14,7 +14,7 @@ metadata:
 
 # Specification section - defines the desired state of the deployment
 spec:
-  replicas: 3                # Number of pod replicas to maintain (3 identical nginx pods)
+  replicas: 2                # Number of pod replicas to maintain (3 identical nginx pods)
   
   # Selector - tells the deployment how to find which pods to manage
   selector:
@@ -38,7 +38,7 @@ spec:
     spec:
       containers:
       - name: nginx          # Name of the container within the pod
-        image: sarowaralam/sarowar-nginx-03  # Docker image to use for the container
+        image: sarowaralam/sarowar-nginx-02  # Docker image to use for the container
         
         # Container ports - defines which ports the container exposes
         ports:
