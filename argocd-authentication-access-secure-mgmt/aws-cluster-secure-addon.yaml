@@ -54,17 +54,16 @@ managedNodeGroups:
   iam:
     withAddonPolicies:
       ebs: true
-      autoScaling: true
-      awsLoadBalancer: true
+      autoScaler: true              # ✅ corrected
+      awsLoadBalancerController: true  # ✅ correct field name
       externalDNS: true
       certManager: true
-      efs: true  # Enable EFS policies
-  volumeSize: 50  # Slightly larger for secure workloads
+      efs: true
+  volumeSize: 50
   volumeType: gp3
   ebsOptimized: true
-  # Security enhancements
   ssh:
     allow: true
-    publicKeyPath: ~/.ssh/id_rsa.pub  # Update with your key path
+    publicKeyPath: ~/.ssh/id_rsa.pub
   privateNetworking: true
-  disableIMDSv1: true  # Disable IMDSv1 for better security
+  disableIMDSv1: true
