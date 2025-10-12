@@ -13,7 +13,7 @@ spec:
   source:
     repoURL: https://github.com/sarowar-alam/sarowar.git
     targetRevision: main
-    path: argocd-nginx/secure-app
+    path: argocd-authentication-access-secure-mgmt/secure-app
     # Add helm values for secret management (if using helm)
     # helm:
     #   valueFiles:

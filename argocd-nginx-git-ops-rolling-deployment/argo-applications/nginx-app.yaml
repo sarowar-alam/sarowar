@@ -26,7 +26,7 @@ spec:
   source:
     repoURL: https://github.com/sarowar-alam/sarowar.git  # Git repository URL
     targetRevision: main         # Git branch/tag/commit to track
-    path: argocd-nginx/nginx     # Path within the repository where Kubernetes manifests are located
+    path: argocd-nginx-git-ops-rolling-deployment/nginx     # Path within the repository where Kubernetes manifests are located
   
   # Destination configuration - defines where to deploy the application
   destination:

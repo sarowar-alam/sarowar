@@ -79,13 +79,3 @@ spec:
     - p, proj:secure-project:admin, applications, *, secure-project/*, allow
     groups:
     - argo-admins
-  
-  # Sync windows (optional - for maintenance windows)
-  syncWindows:
-  - kind: allow
-    schedule: "0 2 * * *"
-    duration: 1h
-    applications:
-    - "*-demo"
-    namespaces:
-    - "secure-app-demo"
