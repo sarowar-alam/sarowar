@@ -1,0 +1,2082 @@
+﻿automated-certificate-update.gvy
+================================
+pipeline {
+    agent { label 'built-in' }
+
+    parameters {
+        choice(
+            name: 'DOMAIN',
+            choices: [
+                '*.my-certificate-name.net' 
+            ],
+            description: 'Select Certificate Name Renew and Update in place ... '
+        )
+    }
+
+    environment {
+
+    AWS_REGION = "us-west-2"
+    PFX_PASS = "your_pfx_password"
+    JENKINS_PFX_PASS = "your_jenkins_pfx_password"
+    my-company-name_PROD_SERVER_IP = "192.168.1.5,192.168.1.6"
+    ZABBIX_PROD_SERVER_IP = "192.168.1.7"
+    JENKINS_LINUX_SERVER_IP = "192.168.1.8"
+
+    CERTIFICATE_UPDATE_STATUS = false   
+    
+    }
+
+    stages {
+        stage('Domain') {
+            steps {
+                echo "You selected: ${params.DOMAIN}"
+            }
+        }
+
+    stage('DetermineValidityPeriod') {
+        steps {
+            script {
+                def baseDomain = params.DOMAIN.replaceFirst(/\*\./, '')  // Remove "*."
+                def subdomain = ""
+
+                switch (baseDomain) {
+                    case "my-certificate-name.net":
+                        subdomain = "zabbix"
+                        break                                               
+                    default:
+                        error "No mapping defined for base domain: ${baseDomain}"
+                }
+
+                def finalDomain = "${subdomain}.${baseDomain}"
+                echo "Mapped Domain: ${finalDomain}"
+                def scriptPath = 'my-git/repo-name/with-path/certificate-update/ssl.ps1'
+                // Run PowerShell script and capture output
+                def output = bat(
+                    script: """
+                    powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}" -Domain "${finalDomain}" 2>&1
+                    """,
+                    returnStdout: true
+                ).trim()
+                
+                echo "Raw script output:\n${output}"
+                
+                def daysLeft = 0
+                for (line in output.readLines()) {
+                    if (line.trim() ==~ /^\d+$/) {
+                        daysLeft = line.trim().toInteger()
+                        break
+                    }
+                }
+                echo "Parsed days left: ${daysLeft}"
+                if (daysLeft == 0) {
+                    echo "SSL certificate is invalid or not accessible."
+                    CERTIFICATE_UPDATE_STATUS = true
+                } else if (daysLeft < 15) {
+                    echo "SSL certificate is about to expire soon (less than 10 days)."
+                    CERTIFICATE_UPDATE_STATUS = true
+                } else {
+                    echo "SSL certificate validity is greater then 10 / we have some issues "
+                    CERTIFICATE_UPDATE_STATUS = false 
+                }
+
+            }
+        }
+    }
+
+
+    stage('StartInstance') {
+        when {
+                expression { CERTIFICATE_UPDATE_STATUS } // Proceed only if validity is less 
+            }            
+            steps {
+                script {
+                    // Map domain to instance ID
+                    def instanceId = ''
+                    switch(params.DOMAIN) {
+                        case '*.my-certificate-name.net':
+                            instanceId = "['i-3f8b71c9d4eaaf235', 'i-7a12de90b5ccfa842']"
+                            break                            
+                        default:
+                            echo "No instance mapping found for domain: ${params.DOMAIN}"
+                    }
+
+                    if (instanceId) {
+                        echo "Using instance ID: ${instanceId}"
+                        withCredentials([
+                            [$class: 'UsernamePasswordMultiBinding',
+                                credentialsId: 'jenkins-aws-credentials-id',
+                                usernameVariable: 'AWS_ACCESS_KEY',
+                                passwordVariable: 'AWS_SECRET_KEY']
+                        ]) {
+                            def scriptPath = 'my-git/repo-name/with-path/certificate-update/start-mainline-rc.py'
+                            // Run Python and capture exit code without failing Jenkins automatically
+                            def exitCode = bat(
+                                script: """
+                                    "python.exe" ${scriptPath} %AWS_ACCESS_KEY% %AWS_SECRET_KEY% ${AWS_REGION} "${instanceId}"
+                                """,
+                                returnStatus: true
+                            )
+
+                            if (exitCode != 0) {
+                                error "Python script failed with exit code ${exitCode}"
+                            } else {
+                                echo "Instance started and passed all status checks."
+                            }
+                        }                        
+                    } else {
+                        echo "Move on to next ..."
+                    }
+
+
+                }
+            }
+        }
+    
+
+
+
+    stage('UpdateCertificate')
+    {
+        when {
+                expression { CERTIFICATE_UPDATE_STATUS } // Proceed only if validity is less 
+            }
+        steps
+        {
+            script
+            {
+                try
+                {
+                    withCredentials([
+                    [$class: 'UsernamePasswordMultiBinding', 
+                    credentialsId: 'jenkins-aws-credentials-id', 
+                    usernameVariable: 'AWS_KEY', 
+                    passwordVariable: 'AWS_SECRET']
+                    ]) 
+                    {
+                        def resultOutput = powershell (
+                            script: "powershell -NoProfile -ExecutionPolicy Bypass -File 'my-git/repo-name/with-path/certificate-update/backup-create-cert.ps1' -Domain '${params.DOMAIN}' -AccessKey '${AWS_KEY}' -SecretKey '${AWS_SECRET}' -PfxPass '${PFX_PASS}'",
+                            returnStdout: true
+                        ).trim()
+
+                        echo "Raw Output: ${resultOutput}"
+
+                        // Detect result
+                        if (resultOutput.contains('[RESULT] NEW_CERT')) {
+                            echo "New certificate created"
+                        } else if (resultOutput.contains('[RESULT] REUSED_CERT')) {
+                            echo "Certificate already existed and was reused"
+                        } else {
+                            error "Could not detect result"
+                        }   
+                    }
+                } catch (err) 
+                {
+                    echo "Script failed with error: ${err.getMessage()}"
+                    currentBuild.result = 'FAILURE'
+                    throw err // rethrow to fail the build
+                }
+            }
+        }
+    } // end of Stage
+
+
+    stage('UpdateACM') {
+        when {
+                expression { CERTIFICATE_UPDATE_STATUS } // Proceed only if validity is less 
+            }
+        steps{
+            script{
+                def domain = params.DOMAIN           // e.g., *.my-company-name-01.com
+                def escapedDomain = domain.replace('*', '!')
+                def certPathGlob = "${env.LOCALAPPDATA}\\Posh-ACME\\LE_PROD\\*\\${escapedDomain}"
+                echo "Certificate path glob: ${certPathGlob}"
+
+                withCredentials([
+                    [$class: 'UsernamePasswordMultiBinding',
+                        credentialsId: 'jenkins-aws-credentials-id',
+                        usernameVariable: 'AWS_ACCESS_KEY',
+                        passwordVariable: 'AWS_SECRET_KEY']
+                ]) {
+                    def scriptPath = 'my-git/repo-name/with-path/certificate-update/update-aws-certificate.py'
+                    // Run Python and capture exit code without failing Jenkins automatically
+                    def exitCode = bat(
+                        script: """
+                            "python.exe" ${scriptPath} %AWS_ACCESS_KEY% %AWS_SECRET_KEY% "${params.DOMAIN}"
+                        """,
+                        returnStatus: true
+                    )
+
+                    if (exitCode != 0) {
+                        error "Python script failed with exit code ${exitCode}"
+                    } else {
+                        echo "Certificates updated in AWS Certificate Manager"
+                    }
+                }    
+
+
+            }
+
+        }
+    } 
+
+    stage('UpdateHOST'){
+        when {
+                expression { CERTIFICATE_UPDATE_STATUS } // Proceed only if validity is less 
+            }
+        steps{
+            script{
+
+                def baseDomain = params.DOMAIN.replaceFirst(/\*\./, '')  // Remove "*."
+                def subdomain = ""
+
+                switch (baseDomain) {
+                    case "my-certificate-name.net":
+
+                        def ipList = env.my-company-name_PROD_SERVER_IP.split(',')
+                        ipList.each { ip ->
+                            echo "Deploying to IP: ${ip}"
+
+                            withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: 'jenkins-windows-remote-admin-id', 
+                            usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']])
+                            {
+                                def result_host_update = powershell(returnStatus: true, script: """
+                                    & 'my-git/repo-name/with-path/certificate-update/update-iis-robust.ps1' -RemoteIP "${ip}" `
+                                                        -Username "${USERNAME}" `
+                                                        -Password "${PASSWORD}" `
+                                                        -CertCN ${params.DOMAIN} `
+                                                        -PfxPassword ${PFX_PASS} `
+                                                        -ConfirmDeletion `
+                                                        -DebugOutput
+                                """)
+                                if (result_host_update != 0) {
+                                    error "PowerShell script failed to update the certificate ${params.DOMAIN} on server ${ip}!"
+                                }
+                            }// End of With Credentials                               
+                        }
+
+                        def SCRIPT_PATH = 'my-git/repo-name/with-path/certificate-update/update-jenkins-windows.ps1'
+                    
+                        try {
+                            // Execute PowerShell with error handling
+                            def psExitCode = powershell(
+                                returnStatus: true,
+                                script: """
+                                    try {
+                                        Write-Host "Starting certificate update for domain: ${params.DOMAIN}"
+                                        
+                                        & "${SCRIPT_PATH}" `
+                                            -CertCN '${params.DOMAIN}' `
+                                            -JksPassword (ConvertTo-SecureString -AsPlainText -Force -String '$env.JENKINS_PFX_PASS') `
+                                            -PfxPassword (ConvertTo-SecureString -AsPlainText -Force -String '$env.PFX_PASS')
+                                        
+                                        if (\$LASTEXITCODE -ne 0) {
+                                            throw "PowerShell script failed with exit code \$LASTEXITCODE"
+                                        }
+                                        Write-Host "Successfully updated certificates"
+                                        exit 0
+                                    } catch {
+                                        Write-Host "##[error]Error during execution: \$_"
+                                        exit 1
+                                    }
+                                """
+                            )
+
+                            if (psExitCode != 0) {
+                                error("Jenkins Certificate update failed with exit code ${psExitCode}")
+                            }
+
+                        } catch (Exception e) {
+                            echo "##[error]Pipeline failed: ${e.getMessage()}"
+                            currentBuild.result = 'FAILURE'
+                            throw e  // Re-throw to mark stage as failed
+                        }
+
+                        try {
+                            def scriptPath = 'my-git/repo-name/with-path/certificate-update/update-jenkins-linux.py'  // Windows path
+                            // Run Python and capture exit code without failing Jenkins automatically
+                            def exitCode = bat(
+                                script: """
+                                    "python.exe" ${scriptPath} "${params.DOMAIN}" "${JENKINS_LINUX_SERVER_IP}"
+                                """,
+                                returnStatus: true
+                            )
+                        } catch (Exception e) {
+                            echo "PIPELINE FAILURE: ${e.getMessage()}"
+                            error("Certificate deployment pipeline failed")
+                        } finally {
+                            echo "--------------------------------------------------"
+                            echo "Deployment process completed (status: ${currentBuild.result ?: 'SUCCESS'})"
+                            echo "--------------------------------------------------"
+                        }   
+
+
+                        try {
+                            def scriptPath = 'my-git/repo-name/with-path/certificate-update/update-zabbix-certificate.py'  // Windows path
+                            // Run Python and capture exit code without failing Jenkins automatically
+                            def exitCode = bat(
+                                script: """
+                                    "python.exe" ${scriptPath} "${params.DOMAIN}" "${ZABBIX_PROD_SERVER_IP}"
+                                """,
+                                returnStatus: true
+                            )
+                        } catch (Exception e) {
+                            echo "PIPELINE FAILURE: ${e.getMessage()}"
+                            error("Certificate deployment pipeline failed")
+                        } finally {
+                            echo "--------------------------------------------------"
+                            echo "Deployment process completed (status: ${currentBuild.result ?: 'SUCCESS'})"
+                            echo "--------------------------------------------------"
+                        }   
+
+                        break                                               
+                    default:
+                        error "No mapping defined for base domain: ${baseDomain}"
+                }                
+
+
+
+            }
+        }
+    }   // End Of Stage Updated Host 
+
+
+    stage('SendMail'){
+        when {
+                expression { CERTIFICATE_UPDATE_STATUS } // Proceed only if validity is less 
+            }
+        steps{
+            script{
+
+                def baseDomain = params.DOMAIN.replaceFirst(/\*\./, '')  // Remove "*."
+                def subdomain = ""
+
+                switch (baseDomain) {
+                    case "my-certificate-name.net":
+                        def TO_LIST = "devops@my-company.com"
+                        def CC_LIST = "mscops@my-company.com; sarowar@my-company.com; sarowar@my-company.com"
+                        def AWS_REGION = "us-east-1"
+                        def bucket_name = "marcombox-logs"
+                        def bucket_prefix = "certificates/"
+
+                        try {
+                            withCredentials([
+                                [$class: 'UsernamePasswordMultiBinding',
+                                credentialsId: 'f7921b08-4448-4862-9aec-75365b928acf',
+                                usernameVariable: 'AWS_KEY',
+                                passwordVariable: 'AWS_SECRET'], 
+                        
+                                [$class: 'UsernamePasswordMultiBinding', 
+                                credentialsId: 'ac8c82cf-4f92-4903-86c6-8985cf7e009c', 
+                                usernameVariable: 'AWS_KEY2', 
+                                passwordVariable: 'AWS_SECRET2']
+                            ]) {
+                                def scriptPath = 'my-git/repo-name/with-path/certificate-update/send_certificate_email.py'
+                                def command = "python.exe \"${scriptPath}\" \"${params.DOMAIN}\" \"${TO_LIST}\" \"${CC_LIST}\" \"%AWS_KEY%\" \"%AWS_SECRET%\" \"${AWS_REGION}\" \"%AWS_KEY2%\" \"%AWS_SECRET2%\" \"${bucket_name}\" \"${bucket_prefix}\"  "
+
+                                echo "[INFO] Running: ${command}"
+                                bat command
+                            }
+                        } catch (err) {
+                            echo "[ERROR] Python script failed: ${err}"
+                            currentBuild.result = 'UNSTABLE'
+                        }
+                        break                                               
+                    default:
+                        error "No mapping defined for base domain: ${baseDomain}"
+                }                
+
+
+
+            }
+        }
+    }   // End Of Stage Send Mail 
+    } // Stages 
+
+post {
+    always {
+        script {
+            try {
+                // Workspace cleanup
+                if (fileExists(env.WORKSPACE)) {
+                    echo "Cleaning up workspace: ${env.WORKSPACE}"
+                    deleteDir()
+                    cleanWs(
+                        cleanWhenNotBuilt: false,
+                        deleteDirs: true,
+                        disableDeferredWipeout: true,
+                        notFailBuild: true,
+                        patterns: [
+                            [pattern: '.gitignore', type: 'INCLUDE'],
+                            [pattern: '.propsfile', type: 'EXCLUDE']
+                        ]
+                    )
+                }
+            } catch (Exception e) {
+                echo "WARNING: Cleanup failed - ${e.message}"
+            }
+        }
+    }
+
+failure {
+    script {
+        try {
+            withCredentials([[
+                $class: 'UsernamePasswordMultiBinding',
+                credentialsId: 'f7921b08-4448-4862-9aec-75365b928acf',
+                usernameVariable: 'AWS_ACCESS_KEY_ID',
+                passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+            ]]) {
+                // Define recipients
+                def toRecipients = "'mscops@my-company.com'"
+                def ccRecipients = "'karim@my-company.com', 'rahim@my-company.com'"
+                
+                // Get error message
+                def errorMsg = currentBuild.rawBuild.getLog(100).findAll { 
+                    it.contains('ERROR') || it.contains('FAIL') || it.contains('Exception') 
+                }.join('\n')
+                if (!errorMsg) {
+                    errorMsg = "No specific error message captured (check build logs)"
+                }
+
+                // Create the properly indented Python script
+                def pythonScript = """\
+import boto3
+import os
+
+def send_email_SES():
+    AWS_REGION = 'us-east-1'
+    SENDER_EMAIL = 'DevOps_Jankins_Automation <noreply@my-certificate-name.net>'
+    TO_RECIPIENTS = [${toRecipients}]
+    CC_RECIPIENTS = [${ccRecipients}]
+    SUBJECT = 'FAILED: ${env.JOB_NAME.replace("'", "\\\\'")} #${env.BUILD_NUMBER}'
+    ERROR_MESSAGE = '''${errorMsg.replace("'", "\\\\'")}'''
+    
+    session = boto3.Session(
+        aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
+        aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY']
+    )
+    ses_client = session.client('ses', region_name=AWS_REGION)
+    
+    try:
+        response = ses_client.send_email(
+            Destination={
+                'ToAddresses': TO_RECIPIENTS,
+                'CcAddresses': CC_RECIPIENTS
+            },
+            Message={
+                'Body': {
+                    'Html': {
+                        'Charset': 'UTF-8',
+                        'Data': f'''<html>
+                            <body>
+                                <h2>Build Failed</h2>
+                                <p><strong>Job:</strong> ${env.JOB_NAME.replace("'", "\\\\'")}</p>
+                                <p><strong>Build:</strong> #${env.BUILD_NUMBER}</p>
+                                <p><strong>Console:</strong> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                                <hr>
+                                <h3>Error Details:</h3>
+                                <pre style="background:#f5f5f5;padding:10px;border-radius:5px;">{ERROR_MESSAGE}</pre>
+                            </body>
+                        </html>'''
+                    }
+                },
+                'Subject': {
+                    'Charset': 'UTF-8',
+                    'Data': SUBJECT
+                },
+            },
+            Source=SENDER_EMAIL,
+        )
+        print('Email sent! Message ID:', response['MessageId'])
+    except Exception as e:
+        print('Email sending failed:', str(e))
+        raise
+
+send_email_SES()
+""".stripIndent()
+
+                // Write and execute
+                writeFile file: 'send_email_temp.py', text: pythonScript
+                def output = bat(script: "python send_email_temp.py", returnStdout: true).trim()
+                echo "Email sending output: ${output}"
+                bat "del send_email_temp.py"
+                
+                if (output.contains("Email sending failed")) {
+                    error("Failed to send notification email")
+                }
+            }
+        } catch (Exception e) {
+            echo "ERROR: Failed to send failure notification - ${e.message}"
+        }
+    }
+}
+} // End of Post Cleanup and Mail of Failure 
+
+
+}// End od Pipeline 
+
+
+backup-create-cert.ps1
+======================
+param (
+    [string]$Domain    = $null,
+    [string]$AccessKey = $null,
+    [string]$SecretKey = $null,
+    [string]$PfxPass   = $null
+)
+
+# --- Validate inputs ---
+if (-not $Domain -or -not $AccessKey -or -not $SecretKey -or -not $PfxPass) {
+    Write-Host "[ERROR] One or more required parameters are missing."
+    exit 1
+}
+
+try {
+    # --- Backup certificate folder if exists ---
+    Write-Host "[Starting Backup Existing certificate Folder]"
+    $escapedDomain = $Domain -replace '\*', '!'
+    $certPathGlob  = "$env:LOCALAPPDATA\Posh-ACME\LE_PROD\*\$escapedDomain"
+    $existingPath  = Get-Item -Path $certPathGlob -ErrorAction SilentlyContinue
+
+    if ($existingPath) {
+        $backupDir = "C:\backup-certificates"
+        if (-not (Test-Path $backupDir)) {
+            New-Item -ItemType Directory -Path $backupDir | Out-Null
+        }
+
+        $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+        $zipFile = Join-Path $backupDir "$($escapedDomain)_$timestamp.zip"
+        Compress-Archive -Path $existingPath.FullName -DestinationPath $zipFile -Force
+        Write-Host "Backup created: $zipFile"
+
+        # --- Delete contents of the existingPath ---
+        Write-Host "[Deleting contents of $($existingPath.FullName)]"
+        Get-ChildItem -Path $existingPath.FullName -Recurse -Force | Remove-Item -Recurse -Force
+    } else {
+        Write-Host "No existing cert folder to back up. Skipping backup."
+    }
+
+    # --- Set AWS credentials ---
+    Write-Host "[Setting AWS credentials]"
+    Set-AWSCredential -AccessKey $AccessKey -SecretKey $SecretKey -StoreAs 'poshacme'
+
+    # --- Prepare PluginArgs ---
+    # $pluginArgs = @{R53ProfileName='poshacme'}
+
+    # --- Execute New-PACertificate ---
+    Write-Host "[Executing New-PACertificate]"
+    $certResult = $null
+
+    try {
+
+        $certResult = New-PACertificate $Domain -AcceptTOS -PfxPass "$PfxPass" -Plugin Route53 -PluginArgs @{R53ProfileName='poshacme'} -Force -ErrorAction Stop
+        # --- DEBUG OUTPUT START ---
+        Write-Host "`n[DEBUG] Dumping certResult:"
+        if ($certResult) {
+            $certResult | Format-List *
+            Write-Host "`n[DEBUG] Individual Checks:"
+            Write-Host "PfxFile        : $($certResult.PfxFile)"
+            Write-Host "PfxFileExists  : $(Test-Path $certResult.PfxFile)"
+            Write-Host "Thumbprint     : $($certResult.Thumbprint)"
+            Write-Host "UsedExisting   : $($certResult.UsedExistingOrder)"
+        } else {
+            Write-Host "[DEBUG] certResult is `$null"
+        }
+        # --- DEBUG OUTPUT END ---
+
+        # --- Updated Logic ---
+        if ($certResult -and $certResult.PfxFile -and (Test-Path $certResult.PfxFile)) {
+            Write-Host "[INFO] Certificate successfully issued."
+            Write-Host "[RESULT] NEW_CERT"
+            Write-Host "PFX Path    : $($certResult.PfxFile)"
+            Write-Host "Thumbprint  : $($certResult.Thumbprint)"
+            
+            # --- ADDITIONAL ACTIONS START ---
+            $certDir = Split-Path $certResult.ChainFile
+            $caCertPath = Join-Path $certDir "CAcert.crt"
+            Copy-Item -Path $certResult.ChainFile -Destination $caCertPath -Force
+
+
+            $sanitizedDomain = $Domain -replace '[^a-zA-Z0-9]', '_'
+            $sanitizedDomain = $sanitizedDomain -replace '_+', '_'            
+            # $keyDir = Split-Path $certResult.KeyFile
+            # $pvkPath = Join-Path $keyDir "${sanitizedDomain}_pvk.pem"
+            # $privatePath = Join-Path $keyDir "${sanitizedDomain}_private.pem"
+
+            # openssl rsa -in $certResult.KeyFile -text -noout > $pvkPath
+            # openssl rsa -in $certResult.KeyFile -out $privatePath
+            # --- ADDITIONAL ACTIONS END ---
+
+
+            exit 0
+        } else {
+            Write-Host "[WARNING] Certificate creation returned unexpected result."
+            exit 1
+        }
+
+    } catch {
+        Write-Host "[ERROR]"
+        $msg = $_.Exception.Message
+        Write-Host "[$msg]"
+
+        if ($msg -match "too many certificates .* issued for this exact set of identifiers") {
+            Write-Host "Rate limit exceeded for domain $Domain. Try again later."
+        }
+        elseif ($msg -match "Unable to find Route53 hosted zone") {
+            $sanitizedDomain = $Domain -replace '[^a-zA-Z0-9]', '_'
+            $sanitizedDomain = $sanitizedDomain -replace '_+', '_' 
+            Write-Host "Hosted zone not found for domain $Domain. Please check Route53 setup. | $sanitizedDomain"
+        }
+        exit 1
+    }
+
+} finally {
+    # --- Final Cleanup ---
+    Write-Host "[Final cleanup]"
+    $credFile = "$env:USERPROFILE\.aws\credentials"
+    if (Test-Path $credFile) {
+        $lines = Get-Content $credFile
+        $filteredLines = @()
+        $insideProfile = $false
+
+        foreach ($line in $lines) {
+            if ($line -match "^\[poshacme\]") {
+                $insideProfile = $true
+                continue
+            }
+            if ($insideProfile -and $line -match "^\[") {
+                $insideProfile = $false
+            }
+
+            if (-not $insideProfile) {
+                $filteredLines += $line
+            }
+        }
+
+        $filteredLines | Set-Content $credFile
+        Write-Host "AWS profile 'poshacme' removed."
+    }
+}
+
+
+
+send_certificate_email.py
+=========================
+import os
+import glob
+import sys
+import boto3
+import subprocess
+from datetime import datetime
+from email.utils import parseaddr
+
+def main(domain, to_list, cc_list, aws_key, aws_secret, region,
+         aws_key_2, aws_secret_2, bucket_name, prefix):
+
+    if not domain:
+        print("[ERROR] Domain is required.")
+        sys.exit(1)
+
+    # Step 1: Locate the certificate directory
+    escaped_domain = domain.replace("*", "!")
+    cert_glob_path = os.path.expandvars(fr"%LOCALAPPDATA%\Posh-ACME\LE_PROD\*\{escaped_domain}")
+    matches = glob.glob(cert_glob_path)
+
+    if not matches:
+        print(f"[ERROR] No matching path found for domain: {escaped_domain}")
+        sys.exit(1)
+
+    cert_dir = matches[0]
+    print(f"[INFO] Found certificate path: {cert_dir}")
+
+    # Step 2: Verify required files exist
+    required_exts = [".pfx", ".cer", ".key"]
+    missing = [ext for ext in required_exts if not any(f.endswith(ext) for f in os.listdir(cert_dir))]
+    if missing:
+        print(f"[ERROR] Missing certificate files: {missing}")
+        sys.exit(1)
+
+    # Step 3: Zip the contents
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    safe_domain = domain.replace("*", "_").replace(".", "_")
+    zip_filename = f"{safe_domain}_certificate_{timestamp}.zip"
+    zip_path = os.path.join("C:\\temp", zip_filename)
+
+    seven_zip = r"C:\Program Files\7-Zip\7z.exe"
+    subprocess.run([seven_zip, 'a', zip_path, f"{cert_dir}\\*"], check=True)
+    print(f"[INFO] Created zip: {zip_path}")
+
+    # Step 4: Upload to S3 and get pre-signed URL
+    pre_signed_url = upload_to_s3_and_get_url(
+        aws_key_2, aws_secret_2, region, bucket_name, prefix, zip_path, zip_filename
+    )
+
+    # Step 5: Parse and send email with download link
+    to_addresses = [addr.strip() for addr in to_list.split(";") if parseaddr(addr)[1]]
+    cc_addresses = [addr.strip() for addr in cc_list.split(";") if parseaddr(addr)[1]]
+
+    session = boto3.Session(
+        aws_access_key_id=aws_key,
+        aws_secret_access_key=aws_secret,
+        region_name=region
+    )
+    ses_client = session.client('ses')
+
+    from_email = 'DevOps Automated_Certificate <noreply@my-company-name.net>'
+    subject = f"Updated Certificate of {domain}"
+    body_text = f"""Hello Team,
+
+The updated certificate for domain {domain} is now available at the secure link below:
+
+{pre_signed_url}
+
+This link will expire in 7 days.
+
+Regards,
+DevOps Team
+"""
+
+    # Send plain email without attachment
+    response = ses_client.send_email(
+        Source=from_email,
+        Destination={
+            'ToAddresses': to_addresses,
+            'CcAddresses': cc_addresses
+        },
+        Message={
+            'Subject': {'Data': subject},
+            'Body': {
+    'Html': {
+        'Data': f"""
+        <html>
+            <body>
+                <p>Hello Team,</p>
+                <p>The updated certificate for domain <strong>{domain}</strong> is now available at the secure link below:</p>
+                <p><a href="{pre_signed_url}">Download {domain} Certificate</a></p>
+                <p>This link will expire in 7 days.</p>
+                <p>Regards,<br>DevOps Team</p>
+            </body>
+        </html>
+        """
+    }
+}
+
+        }
+    )
+    print(f"[INFO] Email sent. SES Message ID: {response['MessageId']}")
+
+
+def upload_to_s3_and_get_url(aws_key, aws_secret, region, bucket, prefix, zip_path, zip_filename):
+    session = boto3.Session(
+        aws_access_key_id=aws_key,
+        aws_secret_access_key=aws_secret,
+        region_name=region
+    )
+    s3 = session.client('s3')
+
+    s3_key = f"{prefix.rstrip('/')}/{zip_filename}"
+
+    s3.upload_file(zip_path, bucket, s3_key)
+    print(f"[INFO] Uploaded to s3://{bucket}/{s3_key}")
+
+    # Generate a 7-day pre-signed URL
+    url = s3.generate_presigned_url(
+        ClientMethod='get_object',
+        Params={'Bucket': bucket, 'Key': s3_key},
+        ExpiresIn=604800  # 7 days
+    )
+    print(f"[INFO] Pre-signed URL: {url}")
+    return url
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 11:
+        print("Usage:")
+        print("python send_certificate_email.py <domain> <to_list> <cc_list> "
+              "<aws_key> <aws_secret> <region> "
+              "<aws_key_2> <aws_secret_2> <bucket> <prefix>")
+        sys.exit(1)
+
+    main(*sys.argv[1:])
+
+
+
+ssl.ps1
+=======
+param (
+    [string]$Domain
+)
+
+if ([string]::IsNullOrWhiteSpace($Domain)) {
+    Write-Error "Domain parameter is required."
+    exit 1
+}
+
+function Get-SSLExpiryDays {
+    param ([string]$HostName)
+
+    try {
+        [System.Net.ServicePointManager]::SecurityProtocol = `
+            [System.Net.SecurityProtocolType]::Tls12 -bor `
+            [System.Net.SecurityProtocolType]::Tls13
+
+        $request = [System.Net.HttpWebRequest]::Create("https://$HostName")
+        $request.Method = "HEAD"
+        $request.Timeout = 5000
+        $request.AllowAutoRedirect = $false
+        $request.GetResponse() | Out-Null
+
+        $servicePoint = [System.Net.ServicePointManager]::FindServicePoint($request.RequestUri)
+        $cert = $servicePoint.Certificate
+
+        if (-not $cert) {
+            Write-Host "[ERROR] No certificate received from $HostName"
+            return 0
+        }
+
+        $cert2 = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 $cert
+        $expiryDate = $cert2.NotAfter
+
+        $daysRemaining = ($expiryDate - (Get-Date)).Days
+
+        if ($daysRemaining -lt 0) {
+            return 0
+        } else {
+            return $daysRemaining
+        }
+    }
+    catch {
+        Write-Host "Failed to retrieve SSL certificate for $HostName"
+        #Write-Host $_.Exception.Message
+        return 0
+    }
+}
+
+# Run the function
+$result = Get-SSLExpiryDays -HostName $Domain
+Write-Output $result
+
+
+
+start-mainline-rc.py
+====================
+import boto3
+import sys
+import time
+import ast  # <--- Import to safely parse the list string
+
+def wait_for_checks(ec2_client, instance_id, timeout=600, interval=15):
+    waited = 0
+    while waited < timeout:
+        try:
+            statuses = ec2_client.describe_instance_status(InstanceIds=[instance_id], IncludeAllInstances=True)
+            if not statuses['InstanceStatuses']:
+                print(f"[INFO] No status available yet for {instance_id}, waiting...")
+            else:
+                status = statuses['InstanceStatuses'][0]
+                system_status = status['SystemStatus']['Status']
+                instance_status = status['InstanceStatus']['Status']
+                print(f"[INFO] {instance_id} -> SystemStatus={system_status}, InstanceStatus={instance_status}")
+
+                if system_status == 'ok' and instance_status == 'ok':
+                    return True
+        except Exception as e:
+            print(f"[ERROR] Exception while checking status for {instance_id}: {e}")
+
+        time.sleep(interval)
+        waited += interval
+
+    return False
+
+def start_instance(access_key, secret_key, region, instance_ids):
+    try:
+        session = boto3.Session(
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            region_name=region
+        )
+        ec2 = session.client('ec2')
+
+        print(f"Starting instances: {', '.join(instance_ids)}")
+        ec2.start_instances(InstanceIds=instance_ids)
+
+        print("Waiting for instances to be running...")
+        waiter = ec2.get_waiter('instance_running')
+        waiter.wait(InstanceIds=instance_ids)
+        print("Instances are running.")
+
+        all_ok = True
+        for instance_id in instance_ids:
+            print(f"Waiting for status checks for {instance_id}...")
+            if wait_for_checks(ec2, instance_id):
+                print(f"Instance {instance_id} passed all checks.")
+            else:
+                print(f"[FAILED] Instance {instance_id} failed status checks.")
+                all_ok = False
+
+        return 0 if all_ok else 1
+
+    except Exception as e:
+        print(f"[ERROR] Failed to start instances or check status: {e}")
+        return 1
+
+if __name__ == "__main__":
+    if len(sys.argv) != 5:
+        print("Usage: python start_instance.py <access_key> <secret_key> <region> \"['i-abc123', 'i-def456']\"")
+        sys.exit(1)
+
+    access_key  = sys.argv[1]
+    secret_key  = sys.argv[2]
+    region      = sys.argv[3]
+
+    try:
+        instance_ids = ast.literal_eval(sys.argv[4])
+        if not isinstance(instance_ids, list):
+            raise ValueError("Instance IDs must be a list.")
+    except Exception as e:
+        print(f"[ERROR] Invalid instance ID list format: {e}")
+        sys.exit(1)
+
+    exit(start_instance(access_key, secret_key, region, instance_ids))
+
+
+
+update-aws-certificate.py
+=========================
+import boto3
+import sys
+from botocore.exceptions import ClientError, BotoCoreError
+import os
+import glob
+
+def reimport_certificate(access_key, secret_key, region, certificate_arn, cert_path, key_path, chain_path):
+    try:
+        # Validate file existence
+        if not os.path.isfile(cert_path):
+            raise FileNotFoundError(f"Certificate file not found: {cert_path}")
+        if not os.path.isfile(key_path):
+            raise FileNotFoundError(f"Private key file not found: {key_path}")
+        if chain_path and not os.path.isfile(chain_path):
+            raise FileNotFoundError(f"Certificate chain file not found: {chain_path}")
+
+        # Read certificate files
+        with open(cert_path, 'rb') as f:
+            certificate_body = f.read()
+
+        with open(key_path, 'rb') as f:
+            private_key = f.read()
+
+        certificate_chain = None
+        if chain_path:
+            with open(chain_path, 'rb') as f:
+                certificate_chain = f.read()
+
+        # Create session and ACM client
+        session = boto3.Session(
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            region_name=region
+        )
+        client = session.client('acm')
+
+        # Reimport certificate
+        if certificate_chain:
+            response = client.import_certificate(
+                CertificateArn=certificate_arn,
+                Certificate=certificate_body,
+                PrivateKey=private_key,
+                CertificateChain=certificate_chain
+            )
+        else:
+            response = client.import_certificate(
+                CertificateArn=certificate_arn,
+                Certificate=certificate_body,
+                PrivateKey=private_key
+            )
+
+        print(f"Certificate reimported successfully in region {region}")
+        return response['CertificateArn']
+
+    except FileNotFoundError as fnf_error:
+        print(f"File error: {fnf_error}")
+        sys.exit(1)
+    except ClientError as e:
+        print(f"AWS ClientError: {e.response['Error']['Message']}")
+        sys.exit(1)
+    except BotoCoreError as e:
+        print(f"BotoCoreError: {str(e)}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Unexpected error: {str(e)}")
+        sys.exit(1)
+
+def get_all_imported_cert_arns(domain_name, access_key, secret_key, regions):
+    matches = []
+
+    for region in regions:
+        try:
+            session = boto3.Session(
+                aws_access_key_id=access_key,
+                aws_secret_access_key=secret_key,
+                region_name=region
+            )
+            client = session.client('acm')
+
+            status_filter = ['ISSUED', 'EXPIRED']
+            paginator = client.get_paginator('list_certificates')
+
+            for page in paginator.paginate(CertificateStatuses=status_filter):
+                for cert_summary in page.get('CertificateSummaryList', []):
+                    cert_arn = cert_summary['CertificateArn']
+                    try:
+                        cert_details = client.describe_certificate(CertificateArn=cert_arn)['Certificate']
+                    except ClientError as e:
+                        print(f"Skipping certificate {cert_arn} in {region} due to describe error: {e.response['Error']['Message']}")
+                        continue
+                    except BotoCoreError as e:
+                        print(f"BotoCoreError while describing certificate {cert_arn} in {region}: {str(e)}")
+                        continue
+
+                    if (
+                        cert_details['DomainName'] == domain_name and
+                        cert_details['Type'] == 'IMPORTED' and
+                        cert_details.get('RenewalEligibility') == 'INELIGIBLE' and
+                        cert_details['Status'] in ['ISSUED', 'EXPIRED']
+                    ):
+                        matches.append({
+                            'CertificateArn': cert_arn,
+                            'Region': region
+                        })
+
+        except ClientError as e:
+            print(f"ClientError accessing ACM in region {region}: {e.response['Error']['Message']}")
+            sys.exit(1)
+        except BotoCoreError as e:
+            print(f"BotoCoreError in region {region}: {str(e)}")
+            sys.exit(1)
+        except Exception as e:
+            print(f"Unexpected error in region {region}: {str(e)}")
+            sys.exit(1)
+
+    return matches
+
+def get_file_path(base_path, filename):
+    path = os.path.join(base_path, filename)
+    if os.path.isfile(path):
+        print(f"[FOUND] {filename} path: {path}")
+        return path
+    else:
+        print(f"[ERROR] {filename} not found at {path}")
+        return None
+
+# Main Script
+if __name__ == "__main__":
+
+    if len(sys.argv) < 3:
+        print("Usage: python script.py <access_key> <secret_key> <domain>")
+        sys.exit(1)
+
+    access_key = sys.argv[1]
+    secret_key = sys.argv[2]
+    domain     = sys.argv[3]
+
+    regions = ['us-west-2', 'us-east-1']
+
+    escaped_domain = domain.replace('*', '!')
+    base_dir = os.environ.get("LOCALAPPDATA")
+    cert_glob_path = os.path.join(base_dir, "Posh-ACME", "LE_PROD", "*", escaped_domain)
+
+    matches = glob.glob(cert_glob_path)
+    if matches:
+        existing_path = matches[0]
+        print(f"[FOUND] Existing path: {existing_path}")
+
+        cert_path  = get_file_path(existing_path, "cert.cer")
+        key_path   = get_file_path(existing_path, "cert.key")
+        chain_path = get_file_path(existing_path, "CAcert.crt")
+
+        if not all([cert_path, key_path, chain_path]):
+            print("[FATAL] One or more required certificate files are missing.")
+            sys.exit(1)
+    else:
+        print("[ERROR] No matching path found.")
+        sys.exit(1)
+
+    results = get_all_imported_cert_arns(domain, access_key, secret_key, regions)
+    if results:
+        for cert in results:
+            print(f"Certificate ARN: {cert['CertificateArn']} found in {cert['Region']}")
+            arn = reimport_certificate(
+                access_key,
+                secret_key,
+                cert['Region'],
+                cert['CertificateArn'],
+                cert_path,
+                key_path,
+                chain_path
+            )
+            if arn:
+                print(f"Updated certificate ARN: {arn}")
+            else:
+                print("Reimport failed.")
+                sys.exit(1)
+    else:
+        print("No matching certificates found.")
+        sys.exit(0)
+
+    sys.exit(0)  # Success
+
+
+
+update-iis-robust.ps1
+=====================
+<#
+.SYNOPSIS
+    Updates IIS SSL certificates and manages old certificate cleanup
+.DESCRIPTION
+    This script now properly transfers all required functions to the remote session
+    to avoid "not recognized" errors during execution.
+#>
+
+param (
+    [Parameter(Mandatory=$true)]
+    [string]$RemoteIP,
+    
+    [Parameter(Mandatory=$true)]
+    [string]$Username,
+    
+    [Parameter(Mandatory=$true)]
+    [string]$Password,
+    
+    [Parameter(Mandatory=$true)]
+    [string]$CertCN,
+    
+    [Parameter(Mandatory=$true)]
+    [string]$PfxPassword,
+    
+    [switch]$ConfirmDeletion = $false,
+    
+    [switch]$DebugOutput = $false
+)
+
+#region Helper Functions
+function Write-Log {
+    param([string]$Message)
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [INFO] $Message" -ForegroundColor Cyan
+}
+
+function Write-ErrorLog {
+    param([string]$Message)
+    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [ERROR] $Message" -ForegroundColor Red
+}
+
+function Get-CertPfxPath {
+    param ([string]$CertCN)
+    $escapedDomain = $CertCN -replace '\*', '!'
+    $basePath = Join-Path $env:LOCALAPPDATA 'Posh-ACME\LE_PROD'
+    $matchingFolder = Get-ChildItem -Path $basePath -Directory -Recurse -ErrorAction SilentlyContinue |
+                      Where-Object { Test-Path (Join-Path $_.FullName $escapedDomain) } |
+                      Select-Object -First 1
+    if ($matchingFolder) {
+        $pfxPath = Join-Path $matchingFolder.FullName "$escapedDomain\cert.pfx"
+        if (Test-Path $pfxPath) {
+            Write-Log "Found cert.pfx at: $pfxPath"
+            return $pfxPath
+        }
+    }
+    Write-ErrorLog "Could not find PFX for CN: $CertCN"
+    return $null
+}
+
+# Define the remote script block with all required functions
+$remoteScriptBlock = {
+    param($CertCN, $PfxPassword, $ConfirmDeletion, $DebugOutput)
+
+    function Write-RemoteLog {
+        param([string]$Message)
+        Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [REMOTE] $Message" -ForegroundColor Green
+    }
+
+    function Get-CertificateUsage {
+        param($thumbprint)
+        $usage = @{
+            IISBindings = @()
+            OtherUsage = $false
+        }
+        
+        # Check IIS bindings
+        Import-Module WebAdministration -ErrorAction SilentlyContinue | Out-Null
+        if (Get-Command Get-WebBinding -ErrorAction SilentlyContinue) {
+            $sites = Get-ChildItem IIS:\Sites -ErrorAction SilentlyContinue
+            foreach ($site in $sites) {
+                $bindings = Get-WebBinding -Name $site.Name -ErrorAction SilentlyContinue | 
+                           Where-Object { $_.protocol -eq "https" -and ($_.CertificateHash -join "") -eq $thumbprint }
+                foreach ($binding in $bindings) {
+                    $usage.IISBindings += @{
+                        Site = $site.Name
+                        Binding = $binding.bindingInformation
+                    }
+                }
+            }
+        }
+        
+        # Check RDP certificate
+        try {
+            $rdpCertThumb = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'SSLCertificateSHA1Hash' -ErrorAction SilentlyContinue).SSLCertificateSHA1Hash
+            if ($rdpCertThumb -and ($rdpCertThumb -replace '\s','') -eq $thumbprint) {
+                $usage.OtherUsage = $true
+            }
+        } catch {}
+        
+        return $usage
+    }
+
+    function Get-CertsBySubjectPattern {
+        param($pattern)
+        $certs = @()
+        $certStore = Get-ChildItem "Cert:\LocalMachine\My" -ErrorAction SilentlyContinue
+        $regexPattern = "^" + [regex]::Escape($pattern) + "$"
+        $regexPattern = $regexPattern -replace '\\\*', '.*'
+        
+        foreach ($cert in $certStore) {
+            $subjectCN = if ($cert.Subject -match "CN=([^,]+)") { $matches[1] } else { $cert.Subject }
+            if ($subjectCN -match $regexPattern -or $subjectCN -eq $pattern) {
+                $certs += $cert
+            }
+        }
+        return $certs | Sort-Object NotAfter -Descending
+    }
+
+    function Show-CertificateBindings {
+        param($label)
+        Write-Host "`n--- $label Certificate Bindings ---"
+        Import-Module WebAdministration -ErrorAction SilentlyContinue | Out-Null
+        if (Get-Command Get-WebBinding -ErrorAction SilentlyContinue) {
+            $sites = Get-ChildItem IIS:\Sites -ErrorAction SilentlyContinue
+            foreach ($site in $sites) {
+                $bindings = Get-WebBinding -Name $site.Name -ErrorAction SilentlyContinue | Where-Object { $_.protocol -eq "https" }
+                foreach ($binding in $bindings) {
+                    $thumbprint = $binding.CertificateHash -join ""
+                    $cert = Get-ChildItem "Cert:\LocalMachine\My\$thumbprint" -ErrorAction SilentlyContinue
+                    $subject = if ($cert) { $cert.Subject } else { "Unknown" }
+                    Write-Host "Site: $($site.Name) | Binding: $($binding.bindingInformation) | Thumbprint: $thumbprint | Subject: $subject"
+                }
+            }
+        }
+        Write-Host "--- End of $label Bindings ---`n"
+    }
+
+    try {
+        # Import new certificate
+        $pfxPath = "C:\Temp\newcert.pfx"
+        $certPass = ConvertTo-SecureString $PfxPassword -AsPlainText -Force
+        $newCert = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\LocalMachine\My" -Password $certPass -Exportable -ErrorAction Stop
+        $newThumb = $newCert.Thumbprint
+        Write-RemoteLog "Imported new certificate: $newThumb"
+
+        # Get all matching certificates
+        $allCerts = Get-CertsBySubjectPattern -pattern $CertCN
+        Write-RemoteLog "Found $($allCerts.Count) certificates matching CN: $CertCN"
+
+        # Update IIS bindings
+        Show-CertificateBindings "Before Update"
+        $updatedSites = @()
+        $sites = Get-ChildItem IIS:\Sites -ErrorAction SilentlyContinue
+        
+        # Import WebAdministration module for IIS cmdlets
+        Import-Module WebAdministration -ErrorAction Stop
+        
+        foreach ($site in $sites) {
+            $bindings = Get-WebBinding -Name $site.Name -ErrorAction SilentlyContinue | Where-Object { $_.protocol -eq "https" }
+            foreach ($binding in $bindings) {
+                $currentThumb = $binding.CertificateHash -join ""
+                if ($currentThumb -eq $newThumb) { continue }
+
+                $ip, $port, $hostname = $binding.bindingInformation -split ":"
+                if ($hostname -like $CertCN -or $hostname -eq ($CertCN -replace '^\*\.','')) {
+                    try {
+                        Write-RemoteLog "Processing binding: Site=$($site.Name), Host=$hostname, IP=$ip, Port=$port"
+                        
+                        # Remove the old binding
+                        Remove-WebBinding -Name $site.Name -Protocol "https" -HostHeader $hostname -Port $port -IPAddress $ip -ErrorAction Stop
+                        Write-RemoteLog "Removed old binding for $($site.Name)"
+                        
+                        # Create the new binding
+                        $newBinding = New-WebBinding -Name $site.Name -Protocol "https" -HostHeader $hostname -Port $port -IPAddress $ip -SslFlags 0 -ErrorAction Stop
+                        
+                        # Check if binding was created successfully before calling methods on it
+                        if ($null -eq $newBinding) {
+                            Write-RemoteLog "Warning: New-WebBinding returned null for $($site.Name). Trying alternative approach."
+                            # Alternative approach using the IIS provider
+                            $bindingPath = "IIS:\Sites\$($site.Name)"
+                            $newBinding = Get-WebBinding -Name $site.Name -Protocol "https" -HostHeader $hostname -Port $port -IPAddress $ip
+                        }
+                        
+                        # Add SSL certificate to the binding
+                        if ($null -ne $newBinding) {
+                            $newBinding.AddSslCertificate($newThumb, "My")
+                            $updatedSites += $site.Name
+                            Write-RemoteLog "Updated binding for $($site.Name)"
+                        } else {
+                            Write-RemoteLog "Error: Could not create or find binding for $($site.Name)"
+                        }
+                    } catch {
+                        Write-Host "[!] Failed to update $($site.Name): $_"
+                    }
+                }
+            }
+        }
+        Show-CertificateBindings "After Update"
+
+        # Certificate cleanup
+        $certsToDelete = $allCerts | Where-Object { 
+            $_.Thumbprint -ne $newThumb -and 
+            (Get-CertificateUsage -thumbprint $_.Thumbprint).IISBindings.Count -eq 0 -and
+            -not (Get-CertificateUsage -thumbprint $_.Thumbprint).OtherUsage
+        }
+
+        if ($certsToDelete.Count -gt 0) {
+            Write-Host "`n=== CERTIFICATES TO DELETE ==="
+            $certsToDelete | ForEach-Object { Write-Host "- $($_.Thumbprint)" }
+
+            if ($ConfirmDeletion) {
+                $deleted = @()
+                foreach ($cert in $certsToDelete) {
+                    try {
+                        Remove-Item -Path $cert.PSPath -Force -ErrorAction Stop
+                        $deleted += $cert.Thumbprint
+                        Write-RemoteLog "Deleted certificate: $($cert.Thumbprint)"
+                    } catch {
+                        Write-Host "[!] Failed to delete $($cert.Thumbprint): $_"
+                    }
+                }
+                Write-RemoteLog "Deleted $($deleted.Count) old certificates"
+            } else {
+                Write-RemoteLog "Use -ConfirmDeletion to remove $($certsToDelete.Count) old certificates"
+            }
+        } else {
+            Write-RemoteLog "No old certificates to delete"
+        }
+
+    } catch {
+        Write-Host "[REMOTE ERROR] $_"
+        throw $_
+    }
+}
+
+#region Main Script Execution
+try {
+    # Validate and initialize
+    if (-not $RemoteIP -or -not $Username -or -not $Password -or -not $CertCN -or -not $PfxPassword) {
+        Write-ErrorLog "Missing required parameters"
+        exit 1
+    }
+
+    # Find local certificate
+    Write-Log "Locating local PFX certificate for CN: $CertCN"
+    $LocalPfxPath = Get-CertPfxPath -CertCN $CertCN
+    if (-not $LocalPfxPath) { exit 1 }
+
+    # Create remote session
+    Write-Log "Connecting to remote server: $RemoteIP"
+    $cred = New-Object System.Management.Automation.PSCredential ($Username, (ConvertTo-SecureString $Password -AsPlainText -Force))
+    $session = New-PSSession -ComputerName $RemoteIP -Credential $cred -ErrorAction Stop
+
+    # Prepare remote environment
+    Invoke-Command -Session $session -ScriptBlock {
+        if (-not (Test-Path "C:\Temp")) { New-Item -Path "C:\Temp" -ItemType Directory -Force | Out-Null }
+    }
+
+    # Copy certificate
+    Write-Log "Copying PFX to remote server..."
+    Copy-Item -Path $LocalPfxPath -Destination "C:\Temp\newcert.pfx" -ToSession $session -Force -ErrorAction Stop
+
+    # Execute remote operations
+    Write-Log "Executing remote certificate update..."
+    Invoke-Command -Session $session -ScriptBlock $remoteScriptBlock -ArgumentList $CertCN, $PfxPassword, $ConfirmDeletion, $DebugOutput -ErrorAction Stop
+
+    Write-Log "Certificate update completed successfully"
+} catch {
+    Write-ErrorLog "Script failed: $_"
+    exit 1
+} finally {
+    if ($session) {
+        Remove-PSSession $session
+        Write-Log "Remote session closed"
+    }
+    Write-Log "Script execution completed"
+}
+
+
+update-jenkins-linux.py
+=======================
+import os
+import glob
+import logging
+import sys
+import paramiko
+from pathlib import Path
+from datetime import datetime
+
+def configure_logging():
+    """Configure basic logging to console"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[logging.StreamHandler()]
+    )
+
+def get_cert_files_path(cert_cn):
+    """
+    Search for JKS certificate files matching the given Common Name pattern.
+    
+    Args:
+        cert_cn (str): Certificate Common Name (e.g., "*.my-company-name1.com")
+    
+    Returns:
+        dict: Dictionary containing cert_dir and jks_path if found, None otherwise
+    """
+    # Replace wildcard with '!' for directory matching
+    escaped_domain = cert_cn.replace('*', '!')
+    # Get actual domain without wildcard for filename matching
+    clean_domain = cert_cn.replace('*.', '')
+    # Base path similar to Posh-ACME's structure
+    base_path = Path(os.getenv('LOCALAPPDATA')) / 'Posh-ACME' / 'LE_PROD'
+    
+    try:
+        # Search through all directories recursively
+        for root, dirs, files in os.walk(base_path):
+            # Look for the escaped domain directory
+            cert_dir = Path(root) / escaped_domain
+            
+            # Search for JKS file with pattern jenkinsl.{clean_domain}.jks
+            jks_pattern = f"jenkinsl.{clean_domain}.jks"
+            jks_files = glob.glob(str(cert_dir / jks_pattern))
+            
+            if jks_files:
+                jks_path = Path(jks_files[0])
+                logging.info(f"Found existing JKS file in: {cert_dir}")
+                return {
+                    'cert_dir': str(cert_dir),
+                    'jks_path': str(jks_path),
+                    'clean_domain': clean_domain
+                }
+        
+        logging.info(f"Could not find JKS file for CN: {cert_cn}")
+        return None
+    
+    except Exception as e:
+        logging.error(f"Error searching for certificate files: {str(e)}")
+        return None
+
+def transfer_jks_to_linux(jks_path, remote_ip, pem_path, clean_domain, timestamp):
+    """
+    Transfer JKS file to Linux server using paramiko
+    
+    Args:
+        jks_path (str): Local path to JKS file
+        remote_ip (str): Remote server IP
+        pem_path (str): Path to PEM file for authentication
+        clean_domain (str): Clean domain name for folder creation
+        timestamp (str): Timestamp for folder naming
+    
+    Returns:
+        str: Remote path where file was transferred, None if failed
+    """
+    username = "rocky"
+    remote_folder = f"/home/{username}/cert_{timestamp}"
+    remote_path = f"{remote_folder}/jenkinsl.{clean_domain}.jks"
+    
+    try:
+        # Create SSH client
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        
+        # Connect using PEM key
+        logging.info(f"Connecting to {remote_ip} as {username}...")
+        ssh.connect(hostname=remote_ip, username=username, key_filename=pem_path)
+        
+        # Create remote directory
+        logging.info(f"Creating remote directory: {remote_folder}")
+        stdin, stdout, stderr = ssh.exec_command(f"mkdir -p {remote_folder}")
+        if stderr.read():
+            raise Exception(f"Error creating directory: {stderr.read().decode()}")
+        
+        # Transfer file using SFTP
+        logging.info(f"Transferring {jks_path} to {remote_path}")
+        sftp = ssh.open_sftp()
+        sftp.put(jks_path, remote_path)
+        sftp.close()
+        
+        logging.info("File transfer completed successfully")
+        return remote_path
+        
+    except Exception as e:
+        logging.error(f"Error during file transfer: {str(e)}")
+        return None
+    finally:
+        if 'ssh' in locals():
+            ssh.close()
+
+def deploy_jks_to_jenkins(ssh, clean_domain, timestamp):
+    """
+    Execute the deployment steps on the remote server with root privileges
+    
+    Args:
+        ssh: Paramiko SSH client
+        clean_domain: Domain name without wildcard
+        timestamp: Timestamp string for backup files
+    
+    Returns:
+        tuple: (success_status, backup_path) 
+    """
+    try:
+        jenkins_cert_path = f"/var/lib/jenkins/certs/jenkinsl.{clean_domain}.jks"
+        backup_path = f"{jenkins_cert_path}_backup_{timestamp}"
+        rocky_path = f"/home/rocky/cert_{timestamp}/jenkinsl.{clean_domain}.jks"
+        
+        # 1. Check if file exists in Jenkins certs directory
+        logging.info(f"Checking for existing JKS at {jenkins_cert_path}")
+        stdin, stdout, stderr = ssh.exec_command(f"sudo test -f {jenkins_cert_path} && echo 'exists' || echo 'not found'")
+        file_exists = stdout.read().decode().strip() == 'exists'
+        
+        # 2. Take backup if file exists
+        if file_exists:
+            logging.info(f"Creating backup: {backup_path}")
+            stdin, stdout, stderr = ssh.exec_command(f"sudo cp {jenkins_cert_path} {backup_path}")
+            if stderr.read():
+                raise Exception(f"Backup failed: {stderr.read().decode()}")
+        
+        # 3. Copy new file (force replace)
+        logging.info(f"Deploying new JKS file to {jenkins_cert_path}")
+        stdin, stdout, stderr = ssh.exec_command(f"sudo cp -f {rocky_path} {jenkins_cert_path}")
+        if stderr.read():
+            raise Exception(f"Copy failed: {stderr.read().decode()}")
+        
+        # 4. Change file permissions
+        logging.info("Updating file ownership...")
+        stdin, stdout, stderr = ssh.exec_command(f"sudo chown jenkins:jenkins {jenkins_cert_path}")
+        if stderr.read():
+            raise Exception(f"chown failed: {stderr.read().decode()}")
+        
+        # 5. Restart Jenkins service
+        logging.info("Restarting Jenkins service...")
+        stdin, stdout, stderr = ssh.exec_command("sudo systemctl restart jenkins.service")
+        exit_status = stdout.channel.recv_exit_status()
+        if exit_status != 0:
+            raise Exception(f"Jenkins restart failed with status {exit_status}")
+        
+        # Verify service status
+        stdin, stdout, stderr = ssh.exec_command("sudo systemctl is-active jenkins.service")
+        service_status = stdout.read().decode().strip()
+        if service_status != "active":
+            raise Exception(f"Jenkins service not active after restart. Status: {service_status}")
+        
+        logging.info("Jenkins service restarted successfully")
+        return (True, backup_path if file_exists else None)
+        
+    except Exception as e:
+        logging.error(f"Deployment error: {str(e)}")
+        return (False, None)
+
+def main():
+    configure_logging()
+    
+    if len(sys.argv) < 3:
+        logging.error("Usage: python script.py <CertificateCN> <RemoteIP> <PemPath>")
+        logging.error("Example: python script.py *.my-company-name1.com 192.168.1.100 C:\\keys\\mykey.pem")
+        sys.exit(1)
+    
+    cert_cn = sys.argv[1]
+    remote_ip = sys.argv[2]
+    pem_path = r"C:\KEYS\AmazonOregon.pem"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    logging.info(f"Searching for certificate: {cert_cn}")
+    result = get_cert_files_path(cert_cn)
+    
+    if not result:
+        print("\nNo matching certificate found.")
+        sys.exit(1)
+        
+    print("\nCertificate found:")
+    print(f"Directory: {result['cert_dir']}")
+    print(f"JKS File: {result['jks_path']}")
+    
+    # Transfer to Linux server
+    print("\nInitiating file transfer...")
+    remote_path = transfer_jks_to_linux(
+        result['jks_path'],
+        remote_ip,
+        pem_path,
+        result['clean_domain'],
+        timestamp
+    )
+    
+    if not remote_path:
+        print("\nFile transfer failed")
+        sys.exit(1)
+    
+    print(f"\nFile successfully transferred to: {remote_path}")
+    
+    # Deploy to Jenkins
+    print("\nStarting deployment to Jenkins...")
+    try:
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(hostname=remote_ip, username="rocky", key_filename=pem_path)
+        
+        success, backup_path = deploy_jks_to_jenkins(ssh, result['clean_domain'], timestamp)
+        
+        if success:
+            print("\nDeployment completed successfully!")
+            print(f"New cert deployed: /var/lib/jenkins/certs/jenkinsl.{result['clean_domain']}.jks")
+            if backup_path:
+                print(f"Backup created: {backup_path}")
+        else:
+            print("\nDeployment failed")
+            sys.exit(1)
+            
+    except Exception as e:
+        logging.error(f"SSH operation failed: {str(e)}")
+        sys.exit(1)
+    finally:
+        if 'ssh' in locals():
+            ssh.close()
+
+if __name__ == "__main__":
+    main()
+
+
+update-jenkins-windows.ps1
+==========================
+<#
+.SYNOPSIS
+    Converts Let's Encrypt certificates in PFX format to JKS format with proper permissions and deploys to Jenkins.
+.DESCRIPTION
+    This script finds Let's Encrypt certificates in PFX format, converts them to JKS format,
+    creates an additional JKS with 'l' suffix, deploys to Jenkins home folder,
+    and safely restarts the Jenkins service after verifying no builds are running.
+#>
+
+param (
+    [Parameter(Mandatory=$true)]
+    [string[]]$CertCN,
+    
+    [Parameter(Mandatory=$true)]
+    [SecureString]$JksPassword,
+    
+    [Parameter(Mandatory=$true)]
+    [SecureString]$PfxPassword    
+)
+
+
+# Convert secure strings to plain text
+try {
+    $jksBstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($JksPassword)
+    $jksPasswordPlainText = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($jksBstr)
+    
+    $pfxBstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($PfxPassword)
+    $pfxPasswordPlainText = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($pfxBstr)
+}
+catch {
+    Write-Error "Failed to convert secure passwords: $_"
+    exit 1
+}
+finally {
+    if ($jksBstr -ne [IntPtr]::Zero) {
+        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($jksBstr)
+    }
+    if ($pfxBstr -ne [IntPtr]::Zero) {
+        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pfxBstr)
+    }
+}
+
+# Logging function
+function Write-Log {
+    param (
+        [string]$Message,
+        [string]$Level = "INFO"
+    )
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logMessage = "[$timestamp] [$Level] $Message"
+    Write-Host $logMessage
+}
+
+# Derive JenkinsUrl from CertCN if not provided
+if (-not $JenkinsUrl -and $CertCN) {
+    $firstDomain = $CertCN[0] -replace '^\*\.', ''
+    $JenkinsUrl = "https://jenkins.$firstDomain"
+    Write-Log "Derived Jenkins URL: $JenkinsUrl" -Level "INFO"
+}
+
+# Function to find Jenkins home directory
+function Get-JenkinsHome {
+    try {
+        # Check environment variable first
+        if ($env:Jenkins_Home) {
+            $jenkinsHome = $env:Jenkins_Home
+            if ($jenkinsHome -match '^(.*\\Jenkins)\\workspace') {
+                return $matches[1]
+            }
+            return $jenkinsHome
+        }
+        
+        # Fallback to common installation paths
+        $commonPaths = @(
+            "C:\Program Files\Jenkins",
+            "C:\Program Files (x86)\Jenkins",
+            "${env:ProgramFiles}\Jenkins",
+            "${env:ProgramFiles(x86)}\Jenkins"
+        )
+        
+        foreach ($path in $commonPaths) {
+            if (Test-Path $path) {
+                return $path
+            }
+        }
+        
+        Write-Log "Could not determine Jenkins home directory" -Level "WARN"
+        return $null
+    }
+    catch {
+        Write-Log "Error finding Jenkins home: $_" -Level "ERROR"
+        return $null
+    }
+}
+
+
+# Modified function to find PFX file instead of CER/KEY pair
+function Get-CertFilesPath {
+    param ([string]$CertCN)
+    
+    $escapedDomain = $CertCN -replace '\*', '!'
+    $basePath = Join-Path $env:LOCALAPPDATA 'Posh-ACME\LE_PROD'
+    
+    try {
+        $matchingFolder = Get-ChildItem -Path $basePath -Directory -Recurse -ErrorAction Stop |
+                          Where-Object { 
+                              $certDir = Join-Path $_.FullName $escapedDomain
+                              (Test-Path (Join-Path $certDir "fullchain.pfx"))
+                          } |
+                          Select-Object -First 1
+        
+        if ($matchingFolder) {
+            $certDir = Join-Path $matchingFolder.FullName $escapedDomain
+            $pfxPath = Join-Path $certDir "fullchain.pfx"
+            
+            Write-Log "Found existing PFX file in: $certDir"
+            return @{
+                CertDir = $certDir
+                PfxPath = $pfxPath
+            }
+        }
+        Write-Log "Could not find PFX file for CN: $CertCN"
+        return $null
+    }
+    catch {
+        Write-Log "Error searching for certificate files: $_"
+        return $null
+    }
+}
+
+# Main processing
+foreach ($cn in $CertCN) {
+    try {
+        Write-Log "Processing certificate for: $cn"
+        
+        # Validate CN pattern
+        if (-not ($cn -match "^\*?\..+")) {
+            Write-Log "Invalid certificate CN pattern: $cn"
+            continue
+        }
+        
+        # Get cert files and directory
+        $certPaths = Get-CertFilesPath -CertCN $cn
+        if (-not $certPaths) {
+            Write-Log "Skipping $cn - PFX file not found"
+            continue
+        }
+        
+        $certAlias = $cn -replace '^\*\.', ''
+        $jksPath = Join-Path $certPaths.CertDir "jenkins.$certAlias.jks"
+        $jksPathWithL = Join-Path $certPaths.CertDir "jenkinsl.${certAlias}.jks"
+        
+        try {
+            # 1. CONVERT PFX â†’ JKS
+            Write-Log "Converting PFX to JKS..."
+            
+            $keytoolOutput = & keytool -importkeystore `
+                -srckeystore $certPaths.PfxPath `
+                -srcstoretype pkcs12 `
+                -srcstorepass $pfxPasswordPlainText `
+                -destkeystore $jksPath `
+                -deststorepass $jksPasswordPlainText `
+                -destkeypass $jksPasswordPlainText `
+                -noprompt 2>&1
+            
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path $jksPath)) {
+                throw "keytool failed: $keytoolOutput"
+            }
+            
+            Write-Log "JKS file created at $jksPath"
+            
+            # Create additional JKS with 'l' suffix
+            Copy-Item -Path $jksPath -Destination $jksPathWithL -Force
+            Write-Log "Additional JKS file created at $jksPathWithL"
+            
+            # 2. SET PERMISSIONS
+            try {
+                & icacls $jksPath /reset /grant:r "*S-1-5-32-544:(R)" "Administrator:(F)" /inheritance:r 2>&1 | Out-Null
+                & icacls $jksPathWithL /reset /grant:r "*S-1-5-32-544:(R)" "Administrator:(F)" /inheritance:r 2>&1 | Out-Null
+                Write-Log "Permissions set on JKS files"
+            }
+            catch {
+                Write-Log "Warning: Failed to set permissions: $_"
+            }
+            
+            # 3. VERIFICATION
+            Write-Log "Verifying keystores:"
+            $verifyOutput = & keytool -list -v -keystore $jksPath -storepass $jksPasswordPlainText 2>&1
+            Write-Log ($verifyOutput -join "`n")
+            
+            $verifyOutputL = & keytool -list -v -keystore $jksPathWithL -storepass $jksPasswordPlainText 2>&1
+            Write-Log ($verifyOutputL -join "`n")
+            
+            
+            # 5. DEPLOY TO JENKINS
+            $jenkinsHome = Get-JenkinsHome
+            if ($jenkinsHome) {
+                $jenkinsJksPath = Join-Path $jenkinsHome "jenkins.$certAlias.jks"
+                
+                # Backup existing files if they exist
+                if (Test-Path $jenkinsJksPath) {
+                    $timestamp = Get-Date -Format "yyyyMMddHHmmss"
+                    $backupPath = "${jenkinsJksPath}_backup_$timestamp"
+                    Copy-Item -Path $jenkinsJksPath -Destination $backupPath -Force
+                    Write-Log "Backup created at $backupPath"
+                }
+                
+                
+                # Copy new JKS files to Jenkins
+                Copy-Item -Path $jksPath -Destination $jenkinsJksPath -Force
+                Write-Log "JKS files deployed to Jenkins directory: $jenkinsHome"
+                
+                # Set permissions on Jenkins JKS files
+                try {
+                    & icacls $jenkinsJksPath /reset /grant:r "*S-1-5-32-544:(R)" "Administrator:(F)" /inheritance:r 2>&1 | Out-Null
+                    Write-Log "Permissions set on Jenkins JKS files"
+                }
+                catch {
+                    Write-Log "Warning: Failed to set permissions on Jenkins JKS files: $_"
+                }
+                
+            }
+            else {
+                Write-Log "Skipping Jenkins deployment - Jenkins home not found"
+            }
+        }
+        catch {
+            Write-Log "Error processing certificate conversion for $cn`: $_"
+        }
+    }
+    catch {
+        Write-Log "Error processing $cn`: $_"
+    }
+}
+
+# Clean up
+Remove-Variable jksPasswordPlainText, pfxPasswordPlainText -ErrorAction SilentlyContinue
+Write-Log "Processing complete"
+exit 0
+
+
+update-zabbix-certificate.py
+============================
+import os
+import glob
+import logging
+import sys
+import paramiko
+from pathlib import Path
+from datetime import datetime
+
+def configure_logging():
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[logging.StreamHandler()]
+    )
+
+def get_cert_files_path(cert_cn):
+    escaped_domain = cert_cn.replace('*', '!')
+    clean_domain = cert_cn.replace('*.', '')    
+    base_path = Path(os.getenv('LOCALAPPDATA')) / 'Posh-ACME' / 'LE_PROD'
+    
+    try:
+        for root, _, _ in os.walk(base_path):
+            cert_dir = Path(root) / escaped_domain
+            if cert_dir.exists():
+                # Verify required files exist
+                required_files = {
+                    'chain0': cert_dir / 'chain0.cer',
+                    'cert': cert_dir / 'cert.cer',
+                    'key': cert_dir / 'cert.key',
+                    'fullchain': cert_dir / 'fullchain.cer'
+                }
+                
+                if all(f.exists() for f in required_files.values()):
+                    logging.info(f"Found certificate files in: {cert_dir}")
+                    return {
+                        'cert_dir': str(cert_dir),
+                        'chain0': str(required_files['chain0']),
+                        'cert': str(required_files['cert']),
+                        'key': str(required_files['key']),
+                        'fullchain': str(required_files['fullchain']),
+                        'clean_domain': clean_domain,
+                        'cert_cn': cert_cn
+                    }
+        
+        logging.info(f"Could not find certificate files for CN: {cert_cn}")
+        return None
+    
+    except Exception as e:
+        logging.error(f"Error searching for certificate files: {str(e)}")
+        return None
+
+def deploy_to_zabbix(ssh, cert_files, timestamp):
+    try:
+        username = "rocky"
+        remote_folder = f"/home/{username}/certificate_update_{timestamp}"
+        ssl_backup = f"{remote_folder}/ssl_backup.zip"
+        
+        # Create remote directory
+        logging.info(f"Creating remote directory: {remote_folder}")
+        stdin, stdout, stderr = ssh.exec_command(f"mkdir -p {remote_folder}")
+        if stderr.read():
+            raise Exception(f"Error creating directory: {stderr.read().decode()}")
+        
+        # Transfer certificate files
+        sftp = ssh.open_sftp()
+        try:
+            logging.info("Transferring certificate files...")
+            remote_files = {
+                'chain0': f"{remote_folder}/chain0.cer",
+                'cert': f"{remote_folder}/cert.cer",
+                'key': f"{remote_folder}/cert.key",
+                'fullchain': f"{remote_folder}/fullchain.cer"
+            }
+            
+            for file_type in remote_files:
+                sftp.put(cert_files[file_type], remote_files[file_type])
+        finally:
+            sftp.close()
+        
+        # Create backup of current SSL files
+        logging.info("Creating backup of current SSL configuration")
+        stdin, stdout, stderr = ssh.exec_command(
+            f"sudo zip -jr {ssl_backup} /etc/httpd/ssl/*"
+        )
+        if stderr.read():
+            raise Exception(f"Backup failed: {stderr.read().decode()}")
+        
+        # Deploy new certificates with proper names
+        domain_prefix = cert_files['cert_cn'].replace('*.', 'star_').replace('.', '_')
+        deploy_commands = [
+            f"sudo cp {remote_folder}/chain0.cer /etc/httpd/ssl/CACert.crt",
+            f"sudo cp {remote_folder}/cert.cer /etc/httpd/ssl/{domain_prefix}.crt",
+            f"sudo cp {remote_folder}/cert.key /etc/httpd/ssl/{domain_prefix}.key",
+            f"sudo cp {remote_folder}/fullchain.cer /etc/httpd/ssl/{domain_prefix}.pem",
+            f"sudo chmod 644 /etc/httpd/ssl/*.crt",
+            f"sudo chmod 644 /etc/httpd/ssl/*.pem",
+            f"sudo chmod 600 /etc/httpd/ssl/*.key",
+            f"sudo chown root:root /etc/httpd/ssl/*"
+        ]
+        
+        for cmd in deploy_commands:
+            logging.info(f"Executing: {cmd}")
+            stdin, stdout, stderr = ssh.exec_command(cmd)
+            if stderr.read():
+                raise Exception(f"Command failed: {cmd} - {stderr.read().decode()}")
+        
+        # Restart services
+        services = ["zabbix-server", "httpd"]
+        for service in services:
+            logging.info(f"Restarting {service} service")
+            stdin, stdout, stderr = ssh.exec_command(f"sudo systemctl restart {service}.service")
+            exit_status = stdout.channel.recv_exit_status()
+            if exit_status != 0:
+                raise Exception(f"Service restart failed: {service}")
+            
+            # Verify service status
+            stdin, stdout, stderr = ssh.exec_command(f"sudo systemctl is-active {service}.service")
+            service_status = stdout.read().decode().strip()
+            if service_status != "active":
+                raise Exception(f"Service not active: {service}. Status: {service_status}")
+        
+        logging.info("Zabbix certificate deployment completed successfully")
+        return True
+        
+    except Exception as e:
+        logging.error(f"Deployment error: {str(e)}")
+        return False
+
+def main():
+    configure_logging()
+    
+    if len(sys.argv) < 3:
+        logging.error("Usage: python script.py <CertificateCN> <RemoteIP> <PemPath>")
+        logging.error("Example: python script.py *.my-company-name.net 192.168.1.100 C:\\keys\\mykey.pem")
+        sys.exit(1)
+    
+    cert_cn = sys.argv[1]
+    remote_ip = sys.argv[2]
+    pem_path = r"C:\KEYS\EUwest.pem"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    logging.info(f"Searching for certificate: {cert_cn}")
+    cert_files = get_cert_files_path(cert_cn)
+    
+    if not cert_files:
+        print("\nNo matching certificate files found.")
+        sys.exit(1)
+        
+    print("\nCertificate files found:")
+    for k, v in cert_files.items():
+        if k not in ['clean_domain', 'cert_cn']:
+            print(f"{k}: {v}")
+    
+    # Connect and deploy to Zabbix server
+    print("\nInitiating Zabbix server deployment...")
+    try:
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(hostname=remote_ip, username="rocky", key_filename=pem_path)
+        
+        if deploy_to_zabbix(ssh, cert_files, timestamp):
+            domain_prefix = cert_files['cert_cn'].replace('*.', 'star_').replace('.', '_')
+            print("\nDeployment completed successfully!")
+            print(f"Backup created: /home/rocky/certificate_update_{timestamp}/ssl_backup.zip")
+            print(f"New certificates deployed:")
+            print(f"  /etc/httpd/ssl/CACert.crt")
+            print(f"  /etc/httpd/ssl/{domain_prefix}.crt")
+            print(f"  /etc/httpd/ssl/{domain_prefix}.key")
+            print(f"  /etc/httpd/ssl/{domain_prefix}.pem")
+            print("\nServices restarted: zabbix-server, httpd")
+            sys.exit(0)
+        else:
+            print("\nDeployment failed")
+            sys.exit(1)
+            
+    except Exception as e:
+        logging.error(f"SSH operation failed: {str(e)}")
+        sys.exit(1)
+    finally:
+        if 'ssh' in locals():
+            ssh.close()
+
+if __name__ == "__main__":
+    main()
+
+
+

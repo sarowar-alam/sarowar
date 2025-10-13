@@ -1,3 +1,12 @@
+<#
+.SYNOPSIS
+    Converts Let's Encrypt certificates in PFX format to JKS format with proper permissions and deploys to Jenkins.
+.DESCRIPTION
+    This script finds Let's Encrypt certificates in PFX format, converts them to JKS format,
+    creates an additional JKS with 'l' suffix, deploys to Jenkins home folder,
+    and safely restarts the Jenkins service after verifying no builds are running.
+#>
+
 param (
     [Parameter(Mandatory=$true)]
     [string[]]$CertCN,

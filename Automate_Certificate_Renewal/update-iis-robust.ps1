@@ -150,6 +150,10 @@ $remoteScriptBlock = {
         Show-CertificateBindings "Before Update"
         $updatedSites = @()
         $sites = Get-ChildItem IIS:\Sites -ErrorAction SilentlyContinue
+        
+        # Import WebAdministration module for IIS cmdlets
+        Import-Module WebAdministration -ErrorAction Stop
+        
         foreach ($site in $sites) {
             $bindings = Get-WebBinding -Name $site.Name -ErrorAction SilentlyContinue | Where-Object { $_.protocol -eq "https" }
             foreach ($binding in $bindings) {
@@ -159,11 +163,31 @@ $remoteScriptBlock = {
                 $ip, $port, $hostname = $binding.bindingInformation -split ":"
                 if ($hostname -like $CertCN -or $hostname -eq ($CertCN -replace '^\*\.','')) {
                     try {
+                        Write-RemoteLog "Processing binding: Site=$($site.Name), Host=$hostname, IP=$ip, Port=$port"
+                        
+                        # Remove the old binding
                         Remove-WebBinding -Name $site.Name -Protocol "https" -HostHeader $hostname -Port $port -IPAddress $ip -ErrorAction Stop
+                        Write-RemoteLog "Removed old binding for $($site.Name)"
+                        
+                        # Create the new binding
                         $newBinding = New-WebBinding -Name $site.Name -Protocol "https" -HostHeader $hostname -Port $port -IPAddress $ip -SslFlags 0 -ErrorAction Stop
-                        $newBinding.AddSslCertificate($newThumb, "My")
-                        $updatedSites += $site.Name
-                        Write-RemoteLog "Updated binding for $($site.Name)"
+                        
+                        # Check if binding was created successfully before calling methods on it
+                        if ($null -eq $newBinding) {
+                            Write-RemoteLog "Warning: New-WebBinding returned null for $($site.Name). Trying alternative approach."
+                            # Alternative approach using the IIS provider
+                            $bindingPath = "IIS:\Sites\$($site.Name)"
+                            $newBinding = Get-WebBinding -Name $site.Name -Protocol "https" -HostHeader $hostname -Port $port -IPAddress $ip
+                        }
+                        
+                        # Add SSL certificate to the binding
+                        if ($null -ne $newBinding) {
+                            $newBinding.AddSslCertificate($newThumb, "My")
+                            $updatedSites += $site.Name
+                            Write-RemoteLog "Updated binding for $($site.Name)"
+                        } else {
+                            Write-RemoteLog "Error: Could not create or find binding for $($site.Name)"
+                        }
                     } catch {
                         Write-Host "[!] Failed to update $($site.Name): $_"
                     }
@@ -250,45 +274,3 @@ try {
     }
     Write-Log "Script execution completed"
 }
-#endregion
-
-
-
-
-
-
-
-
-# pipeline {
-#     agent any
-    
-#     environment {
-#         // Define variables that will hold your credentials
-#         REMOTE_IP = '10.0.3.14'
-#         CERT_CN = '*.xbox.com'
-#     }
-    
-#     stages {
-#         stage('Update IIS Certificate') {
-#             steps {
-#                 script {
-#                     // Get credentials from Jenkins credential store
-#                     withCredentials([
-#                         usernamePassword(credentialsId: 'iis-admin-creds', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD'),
-#                         string(credentialsId: 'pfx-password', variable: 'PFX_PASSWORD')
-#                     ]) {
-#                         // Execute PowerShell script
-#                         powershell """
-#                             .\\Update-IISCertificate.ps1 -RemoteIP "${env.REMOTE_IP}" \
-#                             -Username "${env.USERNAME}" \
-#                             -Password "${env.PASSWORD}" \
-#                             -CertCN "${env.CERT_CN}" \
-#                             -PfxPassword "${env.PFX_PASSWORD}" \
-#                             -ConfirmDeletion
-#                         """
-#                     }
-#                 }
-#             }
-#         }
-#     }
-# }

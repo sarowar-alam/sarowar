@@ -58,7 +58,7 @@ def main(domain, to_list, cc_list, aws_key, aws_secret, region,
     )
     ses_client = session.client('ses')
 
-    from_email = 'DevOps Automated_Certificate <noreply@brandshare.net>'
+    from_email = 'DevOps Automated_Certificate <noreply@my-company-name.net>'
     subject = f"Updated Certificate of {domain}"
     body_text = f"""Hello Team,
 
@@ -86,7 +86,7 @@ DevOps Team
         'Data': f"""
         <html>
             <body>
-                <p>Hello Team ...,</p>
+                <p>Hello Team,</p>
                 <p>The updated certificate for domain <strong>{domain}</strong> is now available at the secure link below:</p>
                 <p><a href="{pre_signed_url}">Download {domain} Certificate</a></p>
                 <p>This link will expire in 7 days.</p>

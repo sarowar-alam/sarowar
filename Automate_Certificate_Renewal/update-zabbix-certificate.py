@@ -131,7 +131,7 @@ def main():
     
     if len(sys.argv) < 3:
         logging.error("Usage: python script.py <CertificateCN> <RemoteIP> <PemPath>")
-        logging.error("Example: python script.py *.xbox.net 192.168.1.100 C:\\keys\\mykey.pem")
+        logging.error("Example: python script.py *.my-company-name.net 192.168.1.100 C:\\keys\\mykey.pem")
         sys.exit(1)
     
     cert_cn = sys.argv[1]
