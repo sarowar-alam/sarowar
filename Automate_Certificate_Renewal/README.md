@@ -94,22 +94,37 @@ This guide assumes an operator with Jenkins admin access and AWS access to Route
 
   ```mermaid
   flowchart TD
-    A[Start Jenkins Job]
-    A --> B{Select DOMAIN}
-    B --> C[Check Certificate Validity (ssl.ps1)]
-    C -- needs renewal --> D[Create/Renew Cert]
-    D --> E[Update ACM]
-    E --> F[Deploy to Hosts]
-    F --> F1[IIS]
-    F --> F2[Jenkins Windows]
-    F --> F3[Jenkins Linux]
-    F --> F4[Zabbix]
-    E --> G[Upload ZIP to S3 & send email]
-    F --> H[Post: Cleanup workspace]
-    H --> I{Success or Failure}
-    I -- Success --> J[Finish]
-    I -- Failure --> K[Send Failure Email & Logs]
-    C -- valid --> J
+    start([Start Jenkins Job])
+    choose{Select DOMAIN}
+    check["Check Certificate Validity\n(ssl.ps1)"]
+    renew["Create / Renew Certificate"]
+    acm["Update AWS ACM"]
+    deploy["Deploy to Hosts"]
+    iis[IIS]
+    jwin["Jenkins - Windows"]
+    jlin["Jenkins - Linux"]
+    zbx[Zabbix]
+    email["Upload ZIP to S3 & send email"]
+    cleanup["Post: Cleanup workspace"]
+    result{"Success or Failure"}
+    finish([Finish])
+    fail["Send Failure Email & Logs"]
+
+    start --> choose
+    choose --> check
+    check -- "needs renewal" --> renew
+    check -- "valid" --> finish
+    renew --> acm
+    acm --> deploy
+    deploy --> iis
+    deploy --> jwin
+    deploy --> jlin
+    deploy --> zbx
+    acm --> email
+    deploy --> cleanup
+    cleanup --> result
+    result -- "Success" --> finish
+    result -- "Failure" --> fail
   ```
 
   ASCII fallback:
