@@ -94,21 +94,22 @@ This guide assumes an operator with Jenkins admin access and AWS access to Route
 
   ```mermaid
   flowchart TD
-      A[Start Jenkins Job]\n    A --> B{Select DOMAIN}
-      B --> C[Check Certificate Validity (ssl.ps1)]
-      C -- needs renewal --> D[Create/Renew Cert (backup-create-cert.ps1)]
-      D --> E[Update ACM (update-aws-certificate.py)]
-      E --> F[Deploy to Hosts]
-      F --> F1[IIS - update-iis-robust.ps1]
-      F --> F2[Jenkins Windows - update-jenkins-windows.ps1]
-      F --> F3[Jenkins Linux - update-jenkins-linux.py]
-      F --> F4[Zabbix - update-zabbix-certificate.py]
-      E --> G[Upload ZIP to S3 & send email (send_certificate_email.py)]
-      F --> H[Post: Cleanup workspace]
-      H --> I{Success or Failure}
-      I -- Success --> J[Finish]
-      I -- Failure --> K[Send Failure Email & Logs]
-      C -- valid --> J
+    A[Start Jenkins Job]
+    A --> B{Select DOMAIN}
+    B --> C[Check Certificate Validity (ssl.ps1)]
+    C -- needs renewal --> D[Create/Renew Cert]
+    D --> E[Update ACM]
+    E --> F[Deploy to Hosts]
+    F --> F1[IIS]
+    F --> F2[Jenkins Windows]
+    F --> F3[Jenkins Linux]
+    F --> F4[Zabbix]
+    E --> G[Upload ZIP to S3 & send email]
+    F --> H[Post: Cleanup workspace]
+    H --> I{Success or Failure}
+    I -- Success --> J[Finish]
+    I -- Failure --> K[Send Failure Email & Logs]
+    C -- valid --> J
   ```
 
   ASCII fallback:
