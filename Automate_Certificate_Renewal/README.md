@@ -89,8 +89,8 @@ This guide assumes an operator with Jenkins admin access and AWS access to Route
 ---
 
   ## Flow diagram
+  Flow Diagram: 
 
-  If your Git hosting supports Mermaid (e.g., GitHub) the diagram below will render. A plain-text ASCII fallback follows for other environments.
 
   ```mermaid
   flowchart TD
@@ -104,7 +104,7 @@ This guide assumes an operator with Jenkins admin access and AWS access to Route
     jwin["Jenkins - Windows"]
     jlin["Jenkins - Linux"]
     zbx[Zabbix]
-    email["Upload ZIP to S3 & send email"]
+    email["Upload ZIP to S3 & Send Mail"]
     cleanup["Post: Cleanup workspace"]
     result{"Success or Failure"}
     finish([Finish])
@@ -112,7 +112,7 @@ This guide assumes an operator with Jenkins admin access and AWS access to Route
 
     start --> choose
     choose --> check
-    check -- "needs renewal" --> renew
+    check -- "Needs Renewal" --> renew
     check -- "valid" --> finish
     renew --> acm
     acm --> deploy
