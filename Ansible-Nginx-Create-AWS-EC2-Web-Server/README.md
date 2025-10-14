@@ -131,8 +131,10 @@ SSH: ssh -i /root/your_key_pair_name.pem ubuntu@3.109.xxx.xxx
 
 ---
 
-## 📧 Contact
+## 🧑‍💻 Author
+**Md. Sarowar Alam**  
+Lead Engineer, Hogarth Worldwide  
+📧 Email: sarowar@hotmail.com  
+🔗 LinkedIn: [linkedin.com/in/sarowar](https://www.linkedin.com/in/sarowar/)
 
-Maintainer: **user_name**  
-Email: user_name@company_name.com  
-Project: `ansible-company_name`
+---
