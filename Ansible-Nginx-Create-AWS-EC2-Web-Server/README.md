@@ -133,7 +133,7 @@ SSH: ssh -i /root/your_key_pair_name.pem ubuntu@3.109.xxx.xxx
 
 ## 🧑‍💻 Author
 **Md. Sarowar Alam**  
-Lead Engineer, Hogarth Worldwide  
+Lead DevOps Engineer, Hogarth Worldwide  
 📧 Email: sarowar@hotmail.com  
 🔗 LinkedIn: [linkedin.com/in/sarowar](https://www.linkedin.com/in/sarowar/)
 

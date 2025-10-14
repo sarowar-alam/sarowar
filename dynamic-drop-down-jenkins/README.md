@@ -48,8 +48,12 @@ Services containing the word prod in their ARN are excluded.
 The script can be extended to support multiple clusters or regions.
 
 Ensure the Jenkins server has permission to run the AWS CLI and access the ECS cluster.
+---
 
-📜 License
-MIT License — feel free to adapt and use.
+## 🧑‍💻 Author
+**Md. Sarowar Alam**  
+Lead DevOps Engineer, Hogarth Worldwide  
+📧 Email: sarowar@hotmail.com  
+🔗 LinkedIn: [linkedin.com/in/sarowar](https://www.linkedin.com/in/sarowar/)
 
-🔗 [View the Jenkins Dynamic Dropdown Script](https://github.com/sarowar-alam/sarowar/tree/main/dynamic-drop-down-jenkins)
+---

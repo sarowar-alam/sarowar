@@ -320,9 +320,10 @@ EventBridge (15min) → Lambda → Assume Roles → Check EC2 Metrics (EC2 + Clo
 
 ---
 
-If you want, I can now:
-- Add a `README` download link or package for distribution (zip the repo),
-- Convert these steps into a CloudFormation or Terraform template, or
-- Update `lambda_function.py` to pull SES sender/recipients from environment variables and add a `DRY_RUN` flag.
+## 🧑‍💻 Author
+**Md. Sarowar Alam**  
+Lead DevOps Engineer, Hogarth Worldwide  
+📧 Email: sarowar@hotmail.com  
+🔗 LinkedIn: [linkedin.com/in/sarowar](https://www.linkedin.com/in/sarowar/)
 
-Tell me what you want next and I'll implement it.
+---

@@ -73,4 +73,10 @@ All artifacts are archived to Jenkins build artifacts and available via `${BUILD
 
 ---
 
-If you'd like this saved as a downloadable PDF or need a one-page quickstart for your team, I can generate that next.
+## 🧑‍💻 Author
+**Md. Sarowar Alam**  
+Lead DevOps Engineer, Hogarth Worldwide  
+📧 Email: sarowar@hotmail.com  
+🔗 LinkedIn: [linkedin.com/in/sarowar](https://www.linkedin.com/in/sarowar/)
+
+---

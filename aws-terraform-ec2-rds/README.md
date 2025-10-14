@@ -153,6 +153,10 @@ You can use `combine.ps1` to merge all Terraform and script files into a single 
 
 ---
 
-## 📜 License
+## 🧑‍💻 Author
+**Md. Sarowar Alam**  
+Lead DevOps Engineer, Hogarth Worldwide  
+📧 Email: sarowar@hotmail.com  
+🔗 LinkedIn: [linkedin.com/in/sarowar](https://www.linkedin.com/in/sarowar/)
 
-This project is managed by **Terraform** and provided as-is for educational and infrastructure provisioning purposes.
+---

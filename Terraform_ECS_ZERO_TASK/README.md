@@ -169,10 +169,10 @@ Licensed under MIT License.
 
 ---
 
-## 🙋‍♂️ Author
-
+## 🧑‍💻 Author
 **Md. Sarowar Alam**  
-🚀 GitHub: [@sarowar-alam](https://github.com/sarowar-alam)  
-📫 Connect on [LinkedIn](https://www.linkedin.com/in/sarowar/)
+Lead DevOps Engineer, Hogarth Worldwide  
+📧 Email: sarowar@hotmail.com  
+🔗 LinkedIn: [linkedin.com/in/sarowar](https://www.linkedin.com/in/sarowar/)
 
 ---

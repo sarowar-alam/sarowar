@@ -125,7 +125,7 @@ SARIF Report: http://<jenkins-url>/job/<job-name>/<build-id>/artifact/trivy-repo
 
 ## 🧑‍💻 Author
 **Md. Sarowar Alam**  
-Lead Engineer, Hogarth Worldwide  
+Lead DevOps Engineer, Hogarth Worldwide  
 📧 Email: sarowar@hotmail.com  
 🔗 LinkedIn: [linkedin.com/in/sarowar](https://www.linkedin.com/in/sarowar/)
 

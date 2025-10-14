@@ -45,4 +45,11 @@ location /api/ {
 }
 ```
 ---
-✅ Now you can test the backend API through Nginx by clicking the button in the frontend page!
+
+## 🧑‍💻 Author
+**Md. Sarowar Alam**  
+Lead DevOps Engineer, Hogarth Worldwide  
+📧 Email: sarowar@hotmail.com  
+🔗 LinkedIn: [linkedin.com/in/sarowar](https://www.linkedin.com/in/sarowar/)
+
+---

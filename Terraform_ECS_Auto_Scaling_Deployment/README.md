@@ -116,6 +116,10 @@ Feel free to fork and extend the setup for your own services. Contributions and 
 
 ---
 
-## 📄 License
+## 🧑‍💻 Author
+**Md. Sarowar Alam**  
+Lead DevOps Engineer, Hogarth Worldwide  
+📧 Email: sarowar@hotmail.com  
+🔗 LinkedIn: [linkedin.com/in/sarowar](https://www.linkedin.com/in/sarowar/)
 
-MIT License
+---
