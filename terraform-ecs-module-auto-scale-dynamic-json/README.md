@@ -154,7 +154,6 @@ Below is the CI/CD flow from Jenkins to AWS ECS using Terraform:
 
 ```mermaid
 flowchart TD
-
     start([Start Jenkins Pipeline])
     config["Load ECS Config<br>(ecs-services.json)"]
     build["Build Docker Image<br>(from App Repo)"]
@@ -193,6 +192,7 @@ flowchart TD
     cleanup --> result
     result -- "Success" --> finish
     result -- "Failure" --> fail
+
 ---
 
 ## 🧑‍💻 Author
