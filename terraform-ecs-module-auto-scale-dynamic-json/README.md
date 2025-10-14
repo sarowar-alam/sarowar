@@ -192,8 +192,11 @@ flowchart TD
     cleanup --> result
     result -- "Success" --> finish
     result -- "Failure" --> fail
+ ```
 
+  ASCII fallback:
 
+```
 
 ## 🧑‍💻 Author
 **Md. Sarowar Alam**  
