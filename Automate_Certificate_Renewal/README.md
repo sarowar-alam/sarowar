@@ -186,15 +186,10 @@ This guide assumes an operator with Jenkins admin access and AWS access to Route
 
 ---
 
-## License
-
-Choose and add a license (e.g., MIT) before publishing to a public Git repo.
+## 🧑‍💻 Author
+**Md. Sarowar Alam**  
+Lead Engineer, Hogarth Worldwide  
+📧 Email: sarowar@hotmail.com  
+🔗 LinkedIn: [linkedin.com/in/sarowar](https://www.linkedin.com/in/sarowar/)
 
 ---
-
-If you want, I can now:
-- Validate the pipeline script names vs files and fix mismatches automatically.
-- Add a small `requirements.txt` for Python dependencies (paramiko, boto3).
-- Add a `dry-run` toggle to scripts.
-
-Tell me which one you'd like next and I'll update the todo list and implement it.

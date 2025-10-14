@@ -151,4 +151,12 @@ environment:
 ```
 
 This setup allows **centralized management** of mixed OS environments with **automation**, **logging**, and **software compliance checks**.
+---
 
+## 🧑‍💻 Author
+**Md. Sarowar Alam**  
+Lead Engineer, Hogarth Worldwide  
+📧 Email: sarowar@hotmail.com  
+🔗 LinkedIn: [linkedin.com/in/sarowar](https://www.linkedin.com/in/sarowar/)
+
+---

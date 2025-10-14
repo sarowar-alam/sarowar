@@ -121,3 +121,12 @@ SARIF Report: http://<jenkins-url>/job/<job-name>/<build-id>/artifact/trivy-repo
 
 - Trivy scans are performed locally in Jenkins agent
 - No sensitive data is exposed in reports (only vulnerabilities & metadata)
+---
+
+## 🧑‍💻 Author
+**Md. Sarowar Alam**  
+Lead Engineer, Hogarth Worldwide  
+📧 Email: sarowar@hotmail.com  
+🔗 LinkedIn: [linkedin.com/in/sarowar](https://www.linkedin.com/in/sarowar/)
+
+---
