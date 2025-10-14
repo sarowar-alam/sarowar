@@ -148,26 +148,51 @@ This automation framework eliminates manual ECS deployments and brings consisten
 It’s designed for **DevOps teams building cloud-native microservices** with AWS Fargate, ECS, and Terraform.
 
 ---
-gitGraph
-   commit id: "init" tag: "v0.0"
-   branch develop
-   commit id: "feat-start"
-   commit id: "feat-progress"
-   checkout main
-   commit id: "hotfix-1"
-   checkout develop
-   merge main
-   commit id: "feat-finish"
-   checkout main
-   merge develop tag: "v1.0.0"
-   commit id: "release-1.0"
-   branch hotfix
-   commit id: "hotfix-issue"
-   checkout main
-   merge hotfix tag: "v1.0.1"
-   checkout develop
-   merge main
+## 🧭 Deployment Flow
 
+Below is the CI/CD flow from Jenkins to AWS ECS using Terraform:
+
+```mermaid
+flowchart TD
+
+    start([Start Jenkins Pipeline])
+    config["Load ECS Config<br>(ecs-services.json)"]
+    build["Build Docker Image<br>(from App Repo)"]
+    scan["Security Scan<br>(Trivy)"]
+    ecr["Push to Amazon ECR"]
+    tfinit["Clone Terraform IaC Repo<br>+ Terraform Init"]
+    tffile["Generate Dynamic tfvars<br>(from Jenkins Params)"]
+    tfapply["Terraform Apply<br>→ ECS + CloudWatch + Autoscaling"]
+    ecs["ECS Fargate Service<br>(Task Definition, Logs)"]
+    cw["CloudWatch Metrics<br>+ Alarms"]
+    sqs["SQS Queue Depth<br>(Scale Triggers)"]
+    scaleout["Scale Out<br>(Add Tasks)"]
+    scalein["Scale In<br>(Remove Tasks)"]
+    verify["Validate Deployment<br>in AWS Console"]
+    cleanup["Post: Cleanup Workspace"]
+    result{"Pipeline Success or Failure"}
+    finish([Finish])
+    fail["Send Notification<br>+ Logs"]
+
+    %% Flow connections
+    start --> config
+    config --> build
+    build --> scan
+    scan -- "No Critical/High Vulns" --> ecr
+    scan -- "Found Issues" --> fail
+    ecr --> tfinit
+    tfinit --> tffile
+    tffile --> tfapply
+    tfapply --> ecs
+    ecs --> cw
+    cw --> sqs
+    sqs -->|Threshold Exceeded| scaleout
+    sqs -->|Below Threshold| scalein
+    ecs --> verify
+    verify --> cleanup
+    cleanup --> result
+    result -- "Success" --> finish
+    result -- "Failure" --> fail
 ---
 
 ## 🧑‍💻 Author
