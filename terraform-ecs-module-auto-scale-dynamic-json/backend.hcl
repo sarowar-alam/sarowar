@@ -1,0 +1,1 @@
+key = "ecs/your_environment_name/mainline/${ecs_service_name}.tfstate"

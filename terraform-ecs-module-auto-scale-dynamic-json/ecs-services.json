@@ -1,0 +1,46 @@
+{
+  "services": [
+    {
+      "ecs_name": "your-ecs-service-name-01",
+      "cpu": 256,
+      "memory": 1024,
+      "disk_size": 21,
+      "min_instances": 1,
+      "max_instances": 5,
+      "threshold": 100,
+      "sqs": "service-01-sqs-name",
+      "env": "arn:aws:s3:::bucket-name-store-env/your_environment_name/your-ecs-service-name-01/your-ecs-service-name-01.env", 
+      "cluster": "your_environment_name-fargate-container-cluster", 
+      "environment": "rc",
+      "docker_file_path": "your-ecs-service-name-01.Service"
+    },
+    {
+      "ecs_name": "your-ecs-service-name-02",
+      "cpu": 256,
+      "memory": 1024,
+      "disk_size": 21,
+      "min_instances": 1,
+      "max_instances": 5,
+      "threshold": 100,
+      "sqs": "service-02-sqs-name",
+      "env": "arn:aws:s3:::bucket-name-store-env/your_environment_name/your-ecs-service-name-02/your-ecs-service-name-02.env", 
+      "cluster": "your_environment_name-fargate-container-cluster", 
+      "environment": "rc",
+      "docker_file_path": "your-ecs-service-name-02.Service"
+    },
+    {
+      "ecs_name": "your-ecs-service-name-03",
+      "cpu": 256,
+      "memory": 1024,
+      "disk_size": 21,
+      "min_instances": 1,
+      "max_instances": 5,
+      "threshold": 100,
+      "sqs": "service-03-sqs-name",
+      "env": "arn:aws:s3:::bucket-name-store-env/your_environment_name/your-ecs-service-name-03/your-ecs-service-name-03.env", 
+      "cluster": "your_environment_name-fargate-container-cluster", 
+      "environment": "rc",
+      "docker_file_path": "your-ecs-service-name-03.Service"
+    }
+  ]
+}
