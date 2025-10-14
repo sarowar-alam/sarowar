@@ -192,15 +192,3 @@ flowchart TD
     cleanup --> result
     result -- "Success" --> finish
     result -- "Failure" --> fail
-
-
----
-
-## 🧑‍💻 Author
-**Md. Sarowar Alam**  
-Lead DevOps Engineer, Hogarth Worldwide  
-📧 Email: sarowar@hotmail.com  
-🔗 LinkedIn: [linkedin.com/in/sarowar](https://www.linkedin.com/in/sarowar/)
-
----
-**Tech Stack:** Jenkins • Terraform • AWS ECS • ECR • SQS • CloudWatch • Trivy  
