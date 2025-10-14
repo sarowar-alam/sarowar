@@ -132,28 +132,11 @@ Terraform provisions ECS Service, Task Definition, CloudWatch Logs, and Autoscal
 
 ---
 
-## 🧾 Example Output
+  ## 🧭 Deployment Flow
 
-After successful run, you’ll have:
-- ECS Service running latest image from ECR
-- Task auto-scaled based on SQS load
-- Terraform-managed infrastructure
-- Security-verified image build history
-
----
-
-## 🏁 Conclusion
-
-This automation framework eliminates manual ECS deployments and brings consistency, scalability, and security to modern infrastructure delivery.  
-It’s designed for **DevOps teams building cloud-native microservices** with AWS Fargate, ECS, and Terraform.
-
----
-## 🧭 Deployment Flow
-
-Below is the CI/CD flow from Jenkins to AWS ECS using Terraform:
-
-```mermaid
-flowchart TD
+  Flow Diagram: 
+  ```mermaid
+ flowchart TD
     start([Start Jenkins Pipeline])
     config["Load ECS Config<br>(ecs-services.json)"]
     build["Build Docker Image<br>(from App Repo)"]
@@ -192,11 +175,28 @@ flowchart TD
     cleanup --> result
     result -- "Success" --> finish
     result -- "Failure" --> fail
- ```
-
+  ```
   ASCII fallback:
+  ```
+  ```
+---
 
-```
+## 🧾 Example Output
+
+After successful run, you’ll have:
+- ECS Service running latest image from ECR
+- Task auto-scaled based on SQS load
+- Terraform-managed infrastructure
+- Security-verified image build history
+
+---
+
+## 🏁 Conclusion
+
+This automation framework eliminates manual ECS deployments and brings consistency, scalability, and security to modern infrastructure delivery.  
+It’s designed for **DevOps teams building cloud-native microservices** with AWS Fargate, ECS, and Terraform.
+
+---
 
 ## 🧑‍💻 Author
 **Md. Sarowar Alam**  
