@@ -90,18 +90,18 @@ It enables:
 
 ```mermaid
 flowchart TD
+    A[Jenkins Scheduled or Manual Trigger] --> B{Terraform Action}
+    B -->|Create| C[Provision Windows EC2 with SQL Server via Terraform]
+    C --> D[Retrieve Admin Password]
+    D --> E[Add Trusted Host via PowerShell]
+    E --> F[Download DB Backup from S3 (Cross Account)]
+    F --> G[Restore Database using SQLCMD]
+    G --> H[Run Validation Queries (Test vs Prod)]
+    H --> I[Send SES Email Report]
+    I --> J[Remove Trusted Hosts]
+    J --> K[Destroy EC2 Environment]
+    B -->|Delete| K
 
-A[Jenkins Scheduled/Manual Trigger] --> B{Terraform Action}
-B -->|Create| C[Provision Windows EC2 with SQL Server via Terraform]
-C --> D[Retrieve Admin Password]
-D --> E[Add Trusted Host via PowerShell]
-E --> F[Download DB Backup from S3 (Cross-account)]
-F --> G[Restore Database using SQLCMD]
-G --> H[Run Validation Queries (Test vs Prod)]
-H --> I[Send SES Email Report]
-I --> J[Remove Trusted Hosts]
-J --> K[Destroy EC2 Environment]
-B -->|Delete| K
 ```
 
 ---
