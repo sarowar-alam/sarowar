@@ -1,0 +1,11 @@
+version = 0.1
+
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "ostad-serverless-app"       # CloudFormation stack name
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-2025-10-17" # SAM-managed S3 bucket
+s3_prefix = "ostad-serverless-app"        # Folder prefix in the S3 bucket
+region = "ap-south-1"                     # Deployment region (Mumbai)
+confirm_changeset = true                  # Prompt for approval before deploy
+capabilities = "CAPABILITY_IAM"           # Allow creation of IAM roles/policies

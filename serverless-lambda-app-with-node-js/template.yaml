@@ -1,0 +1,72 @@
+AWSTemplateFormatVersion: '2010-09-09'     # CloudFormation template version
+Transform: AWS::Serverless-2016-10-31      # Enables SAM-specific resources
+
+Globals:                                   # Default settings for all functions
+  Function:
+    Timeout: 30                            # Max Lambda execution time (seconds)
+    Runtime: nodejs18.x                    # Node.js runtime version
+    Environment:
+      Variables:
+        ENVIRONMENT: "dev"                 # Common environment variable
+
+Resources:
+  # 🟦 DynamoDB Table Definition
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ostad-UsersTable          # Table name (will appear in AWS Console)
+      BillingMode: PAY_PER_REQUEST         # On-demand pricing model
+      AttributeDefinitions:                # Define primary key schema
+        - AttributeName: userId
+          AttributeType: S                 # String type key
+      KeySchema:
+        - AttributeName: userId
+          KeyType: HASH                    # Partition key
+
+  # 🟩 Lambda Function to CREATE a user
+  CreateUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/                        # Source code folder
+      Handler: create-user.handler         # Entry point file.function
+      Runtime: nodejs18.x
+      Policies:
+        - DynamoDBCrudPolicy:              # Built-in SAM policy for full CRUD
+            TableName: !Ref UsersTable
+      Environment:
+        Variables:
+          USERS_TABLE: !Ref UsersTable     # Inject table name into environment
+      Events:                              # Define API Gateway trigger
+        CreateUser:
+          Type: Api
+          Properties:
+            Path: /users                   # POST /users
+            Method: post
+
+  # 🟨 Lambda Function to GET a user by ID
+  GetUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: get-user.handler
+      Runtime: nodejs18.x
+      Policies:
+        - DynamoDBReadPolicy:              # Read-only access to the table
+            TableName: !Ref UsersTable
+      Environment:
+        Variables:
+          USERS_TABLE: !Ref UsersTable
+      Events:
+        GetUser:
+          Type: Api
+          Properties:
+            Path: /users/{userId}          # GET /users/{userId}
+            Method: get
+
+Outputs:                                   # CloudFormation Outputs
+  ApiUrl:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+  UsersTableName:
+    Description: "DynamoDB Table Name"
+    Value: !Ref UsersTable

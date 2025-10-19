@@ -1,0 +1,51 @@
+2025-10-16 17:27:03,465 - INFO - Starting EC2 instance migration process
+2025-10-16 17:27:03,465 - INFO - Profile: sarowar-sp, Instance: i-015aa5011dc898635, AMI: ami-0a2a8f828cb69e889
+2025-10-16 17:27:34,272 - INFO - Step 1: Getting instance details...
+2025-10-16 17:27:37,107 - INFO - Found credentials in shared credentials file: ~/.aws/credentials
+2025-10-16 17:27:37,842 - ERROR - Unexpected error getting instance details: You must specify a region.
+2025-10-16 17:27:37,842 - ERROR - Unexpected error: You must specify a region.
+2025-10-16 17:27:37,842 - ERROR - Traceback: Traceback (most recent call last):
+  File "c:\Cloud\WT\OneDrive - WPP Cloud\Documents\pyhton_scripts\terminate-ec2-create-new-one.py", line 322, in main
+    instance_details = get_instance_details(OLD_INSTANCE_ID, PROFILE_NAME)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Cloud\WT\OneDrive - WPP Cloud\Documents\pyhton_scripts\terminate-ec2-create-new-one.py", line 84, in get_instance_details
+    ec2 = session.resource('ec2')
+          ^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\sarowar.alam\AppData\Local\Programs\Python\Python312\Lib\site-packages\boto3\session.py", line 446, in resource
+    client = self.client(
+             ^^^^^^^^^^^^
+  File "c:\Users\sarowar.alam\AppData\Local\Programs\Python\Python312\Lib\site-packages\boto3\session.py", line 299, in client
+    return self._session.create_client(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\sarowar.alam\AppData\Local\Programs\Python\Python312\Lib\site-packages\botocore\session.py", line 997, in create_client
+    client = client_creator.create_client(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\sarowar.alam\AppData\Local\Programs\Python\Python312\Lib\site-packages\botocore\client.py", line 161, in create_client
+    client_args = self._get_client_args(
+                  ^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\sarowar.alam\AppData\Local\Programs\Python\Python312\Lib\site-packages\botocore\client.py", line 508, in _get_client_args
+    return args_creator.get_client_args(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\sarowar.alam\AppData\Local\Programs\Python\Python312\Lib\site-packages\botocore\args.py", line 100, in get_client_args
+    final_args = self.compute_client_args(
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\sarowar.alam\AppData\Local\Programs\Python\Python312\Lib\site-packages\botocore\args.py", line 219, in compute_client_args
+    endpoint_config = self._compute_endpoint_config(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\sarowar.alam\AppData\Local\Programs\Python\Python312\Lib\site-packages\botocore\args.py", line 369, in _compute_endpoint_config
+    return self._resolve_endpoint(**resolve_endpoint_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\sarowar.alam\AppData\Local\Programs\Python\Python312\Lib\site-packages\botocore\args.py", line 474, in _resolve_endpoint
+    return endpoint_bridge.resolve(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\sarowar.alam\AppData\Local\Programs\Python\Python312\Lib\site-packages\botocore\client.py", line 613, in resolve
+    resolved = self.endpoint_resolver.construct_endpoint(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\sarowar.alam\AppData\Local\Programs\Python\Python312\Lib\site-packages\botocore\regions.py", line 229, in construct_endpoint
+    result = self._endpoint_for_partition(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\sarowar.alam\AppData\Local\Programs\Python\Python312\Lib\site-packages\botocore\regions.py", line 277, in _endpoint_for_partition
+    raise NoRegionError()
+botocore.exceptions.NoRegionError: You must specify a region.
+
+2025-10-16 17:27:37,842 - INFO - Instance migration process completed

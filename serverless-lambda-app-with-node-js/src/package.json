@@ -1,0 +1,8 @@
+{
+  "name": "ostad-lambda-functions",  // Local module name
+  "version": "1.0.0",
+  "dependencies": {
+    "aws-sdk": "^2.1467.0",           // AWS SDK to access DynamoDB and other services
+    "uuid": "^9.0.0"                  // For generating unique user IDs
+  }
+}

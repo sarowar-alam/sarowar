@@ -1,0 +1,4119 @@
+﻿groovy\db-restore-test.gvy
+==========================
+def DB_CHOICES = [
+    'DB001.Global',
+    'DB002.Global', 
+    'DB003.Global'
+    ]
+
+pipeline {
+    agent { label 'built-in' }
+    parameters {
+        choice(
+            name: 'TERRAFORM_ACTION',
+            choices: [
+                'Create',
+                'Delete' 
+            ],
+            description: 'Whether you want to create / delete the environment'
+        )
+        choice(
+            name: 'DB_GLOBAL',
+            choices: DB_CHOICES,  // Use the variable here
+            description: 'Select YOUR DB Name'
+        )       
+    }
+    environment {
+
+        CHECK_MONDAY = false
+
+        AWS_REGION = 'us-east-1'
+        IS_CREATE = false
+        IS_DELETE = false        
+        TF_PATH="${WORKSPACE}/Automated-MS-SQL-Backup-Restore-Job/"
+        TF_INSTANCE_IP=""
+
+        ADD_TRUSTED_HOSTS = "Automated-MS-SQL-Backup-Restore-Job\\scripts\\add-trusted-host.ps1"
+        REMOVE_TRUSTED_HOSTS = "Automated-MS-SQL-Backup-Restore-Job\\scripts\\remove-trusted-host.ps1"
+        DOWNLOAD_DB_TRANSFER = "Automated-MS-SQL-Backup-Restore-Job\\scripts\\download-transfer-db.py"
+        PASSWORD_FILE = "Automated-MS-SQL-Backup-Restore-Job\\password.txt"
+
+        DOWNLOAD_DB_REMOTE_SERVER = "Automated-MS-SQL-Backup-Restore-Job/scripts/download-s3-backup-remote.ps1"
+        
+        RESTORE_DB_SQL_CMD = "Automated-MS-SQL-Backup-Restore-Job/scripts/restore-db-sqlcmd.ps1"
+        EXECUTE_DB_SQL_CMD = "Automated-MS-SQL-Backup-Restore-Job/scripts/execute-query.ps1"
+        EXECUTE_DB_SQL_CMD_PROD = "Automated-MS-SQL-Backup-Restore-Job/scripts/execute-query-prod.ps1"
+
+        powershellScriptPath = "Automated-MS-SQL-Backup-Restore-Job/scripts/download-transfer-db.ps1"
+
+        PROD_SQL_IP="192.168.1.5"
+
+        SQL_QUERY_FILE = "Automated-MS-SQL-Backup-Restore-Job/scripts/sql-query.sql"
+
+        SECURE_PASSWORD = ""
+
+        SOURCE_ROLE_ARN = "arn:aws:iam::YOUR_ACCOUNT_ID:role/restore-rc-mainline"
+        SOURCE_BUCKET = "YOUR_SOURCE_BUCKET_NAME"
+        SOURCE_PREFIX = "YOUR_SOURCE_PREFIX/"
+        DEST_ROLE_ARN = "arn:aws:iam::YOUR_TEST_ACCOUNT_ID:role/restore"
+        DEST_BUCKET = "YOUR_DEST_BUCKET_NAME"
+        DEST_PREFIX = "YOUR_DEST_PREFIX/"
+        REMOTE_LOCAL_DIR = "C:\\YOUR_REMOTE-DIR\\"
+        PYTHON = 'python'
+    }
+    stages {
+
+
+        stage('CheckLastMonday') {
+            steps {
+                script {
+                    // Capture the boolean output from PowerShell
+                    def result = powershell(
+                        returnStdout: true, 
+                        script: '''
+                            & "Automated-MS-SQL-Backup-Restore-Job/scripts/last-monday.ps1"
+                        '''
+                    ).trim()
+                    echo "Captured Output: ${result}"
+                    
+                    if (result == "False") {
+                        CHECK_MONDAY = false
+                    } else {
+                        CHECK_MONDAY = true
+                    }
+                    echo "Is last Monday: ${CHECK_MONDAY}"
+                }
+            }
+        }
+
+        stage('InitializeVariables') {
+            steps {
+                script {
+
+                    IS_CREATE = params.TERRAFORM_ACTION == 'Create'
+                    IS_DELETE = params.TERRAFORM_ACTION == 'Delete'
+                    echo "Creation is: ${IS_CREATE} | Deletion is: ${IS_DELETE}"
+                }
+            }
+        }
+
+        stage('IdentifyTriggerSource') {
+            steps {
+                script {
+                    def triggerCause = currentBuild.getBuildCauses()
+                    def selectedDB = params.DB_GLOBAL
+                    def triggeredBy = "Unknown"
+                    
+                    if (triggerCause.find { it._class.contains('TimerTriggerCause') }) {
+                        def currentDateTime = new Date().format("yyyy-MM-dd HH:mm:ss")
+                        echo "Build Trigger Type: SCHEDULED"
+                        echo "Current Date Time: ${currentDateTime}"
+                        
+                        // Use the same variable here for random selection
+                        selectedDB = DB_CHOICES[new Random().nextInt(DB_CHOICES.size())]
+                        echo "Randomly selected DB: ${selectedDB}"
+                        triggeredBy = "System Scheduler"
+                    } else {
+                        // Get user information when manually triggered
+                        def userCause = triggerCause.find { it._class.contains('UserIdCause') }
+                        if (userCause) {
+                            triggeredBy = userCause.userName ?: userCause.userId ?: "Unknown User"
+                        }
+                        echo "Build Trigger Type: USER_TRIGGERED"
+                        echo "Triggered By: ${triggeredBy}"
+                    }
+                    env.SELECTED_DB = selectedDB
+                    env.TRIGGERED_BY = triggeredBy
+                }
+            }
+        }
+
+    stage('EC2Deploy'){
+        when {
+                expression { IS_CREATE && CHECK_MONDAY } // Proceed only if validity is less 
+            }        
+        steps{
+            script{
+                echo "Lets Build the Environment ! "
+                dir("terraform"){
+                    git (url: 'git@github.com:sarowar-alam/sarowar.git',branch: 'main',credentialsId: 'YOUR_CREDENTIALS_ID_HERE')
+                    
+                    // Terraform apply
+                    powershell """
+                        Write-Host "Working with path: ${env.TF_PATH}"
+                        Set-Location "${TF_PATH}"
+                        terraform init
+                        terraform plan
+                        terraform apply -auto-approve
+                    """
+                    
+                    try {
+                        // Get Terraform outputs as JSON
+                        def tfOutput = powershell(returnStdout: true, script: """
+                            Set-Location "${TF_PATH}"
+                            terraform output -json
+                        """).trim()
+                        
+                        // Parse the JSON
+                        def tfJson = readJSON text: tfOutput
+                        
+                        // Validate and extract instance_public_ip
+                        if (!tfJson || !tfJson.containsKey('instance_public_ip')) {
+                            error("instance_public_ip not found in Terraform outputs. Available outputs: ${tfJson?.keySet()?.join(', ') ?: 'None'}")
+                        }
+                        
+                        def instancePublicIp = tfJson.instance_public_ip.value
+                        if (!instancePublicIp) {
+                            error("instance_public_ip value is empty or null")
+                        }
+                        
+                        echo "Captured instance public IP: ${instancePublicIp}"                        
+                        // Read password file
+                        def password = powershell(returnStdout: true, script: """
+                            Set-Location "${TF_PATH}"
+                            if (Test-Path password.txt) {
+                                Get-Content password.txt -Raw
+                            } else {
+                                Write-Error "password.txt file not found in ${TF_PATH}"
+                                exit 1
+                            }
+                        """).trim()
+
+                        if (!password) {
+                            error("Password file is empty or could not be read")
+                        }
+
+                        // Store variables
+                        tfInstanceIp = instancePublicIp
+                        env.TF_INSTANCE_IP = instancePublicIp
+                        
+                    } catch (Exception e) {
+                        echo "ERROR during Terraform output processing: ${e.getMessage()}"
+                        // Optional: Add terraform destroy on failure
+                        powershell """
+                            Set-Location "${TF_PATH}"
+                            terraform plan
+                        """
+                        error("Failed to process Terraform outputs: ${e.getMessage()}")
+                    }
+                }
+            }
+        }
+    }
+
+    stage('Destroy'){
+        when {
+                expression { IS_DELETE } // Proceed only if validity is less 
+            }        
+        steps{
+            script{
+                echo "Lets Build the Environment ! "
+                dir("terraform"){
+                    git (url: 'git@github.com:sarowar-alam/sarowar.git',branch: 'main',credentialsId: 'YOUR_CREDENTIALS_ID_HERE')
+                    
+                    // Terraform apply
+                    powershell """
+                        Write-Host "Working with path: ${env.TF_PATH}"
+                        Set-Location "${TF_PATH}"
+                        terraform init
+                        terraform destroy -auto-approve
+                    """
+                }
+            }
+        }
+    }
+
+
+
+    // In subsequent stages, you can access these variables
+    stage('TerraformOutputs') {
+        when {
+                expression { IS_CREATE && CHECK_MONDAY } // Proceed only if validity is less 
+            }         
+        steps {
+            script {
+                echo "Using instance IP: ${tfInstanceIp}"
+            }
+        }
+    }    
+
+    stage('AddTrustedHosts') {
+        when {
+                expression { IS_CREATE && CHECK_MONDAY} // Proceed only if validity is less 
+            }         
+        steps {
+            script {
+                def targetIp = tfInstanceIp?.trim()
+                if (!targetIp) {
+                    error("IP address parameter is required")
+                }
+                
+                try {
+                    // Execute the PowerShell script
+                    def result = bat(
+                        script: """
+                            aws sts get-caller-identity
+                            whoami
+                            powershell -ExecutionPolicy Bypass -File "${ADD_TRUSTED_HOSTS}" -IPAddress "${targetIp}"
+                        """,
+                        returnStatus: true,  // Return exit code instead of stdout
+                        label: "Adding ${targetIp} to trusted hosts"
+                    )
+                    
+                    
+                    // Check the exit code
+                    if (result != 0) {
+                        error("Failed to add IP to trusted hosts. PowerShell script exited with code: ${result}")
+                    }
+                    
+                    echo "Successfully added ${targetIp} to trusted hosts"
+                    
+                } catch (Exception e) {
+                    echo "ERROR: Failed to execute trusted hosts script: ${e.getMessage()}"
+                    echo "Target IP: ${targetIp}"
+                    echo "Script path: ${ADD_TRUSTED_HOSTS}"
+                    error("Trusted hosts operation failed")
+                }
+            }
+        }
+    }    
+
+
+    stage('DownloadTransferDB') {
+        when {
+            expression { IS_CREATE && CHECK_MONDAY} // Proceed only if validity is less 
+        }         
+        steps {
+            script {
+
+                def targetIp = tfInstanceIp?.trim()
+                if (!targetIp) {
+                    error("IP address parameter is required")
+                }
+                def S3_PREFIX_SOURCE = "${SOURCE_PREFIX}${env.SELECTED_DB}"     
+                // For shell commands, use single quotes to prevent interpretation
+                
+                def result = bat(
+                    script: """
+                    python "${DOWNLOAD_DB_TRANSFER}" --source-role-arn "${SOURCE_ROLE_ARN}" --source-bucket "${SOURCE_BUCKET}" --source-prefix "${S3_PREFIX_SOURCE}" --dest-role-arn "${DEST_ROLE_ARN}" --dest-bucket "${DEST_BUCKET}" --dest-prefix "${DEST_PREFIX}"
+                    """,
+                    returnStatus: true,
+                    label: "Trasferring DB to ${targetIp}"
+                )
+
+                // Check the exit code
+                if (result != 0) {
+                    error("Failed to transfer DB with code ${result}")
+                }                
+                echo "Successfully transferred DB to ${targetIp}"                
+            }
+        }
+        
+        post {
+            success {
+                echo "Database transfer completed successfully!"
+            }
+            failure {
+                echo "Database transfer failed!"
+            }
+        }
+    }
+
+    stage('DownloadDBRemote') {
+        when {
+            expression { IS_CREATE && CHECK_MONDAY }
+        }         
+        steps {
+            script {
+                def targetIp = tfInstanceIp?.trim()
+                if (!targetIp) {
+                    error("IP address parameter is required")
+                }
+                def DB_NAME = "${env.SELECTED_DB}"
+
+                try {
+                    echo "We are about to Download DB in ${targetIp}"
+                    echo "Our DB Name ${DB_NAME}"
+                    echo "Script will be Executed ${DOWNLOAD_DB_REMOTE_SERVER}"
+                    def result = bat(
+                        script: """
+                            powershell -ExecutionPolicy Bypass -File "${DOWNLOAD_DB_REMOTE_SERVER}" -RemoteServer "${targetIp}" -Username "administrator" -S3BucketName "${DEST_BUCKET}" -S3Prefix "${DEST_PREFIX}" -DBName "${DB_NAME}" -RemoteDirectory "C:\\YOUR_REMOTE-DIR\\"
+                        """,
+                        returnStatus: true,  // Return exit code instead of stdout
+                        label: "Downlaoding DB ${DB_NAME} in ${targetIp}"
+                    )
+                    // Check the exit code
+                    if (result == 0) {
+                        echo "Successfully Downloaded ${DB_NAME} in ${targetIp}"
+                    } else {
+                        error("Failed to download DB ${DB_NAME} in ${result}")
+                    }
+                                            
+
+                } catch (Exception e) {
+                    currentBuild.result = 'FAILURE'
+                    error("Database Download failed: ${e.getMessage()}")
+                }
+            }
+        }
+    }
+
+
+
+    stage('RestoreDatabase') {
+        when {
+                expression { IS_CREATE && CHECK_MONDAY} // Proceed only if validity is less 
+            }         
+        steps {
+            script {
+                def targetIp = tfInstanceIp?.trim()
+                if (!targetIp) {
+                    error("IP address parameter is required")
+                }
+                def DB_NAME = "${env.SELECTED_DB}"                     
+                try {
+                    def restore_db_with_sqlcmd = powershell(returnStatus: true, script: """
+                        & '${RESTORE_DB_SQL_CMD}' -RemoteServerIP '${targetIp}' `
+                                                -Username 'administrator' `
+                                                -RemoteFolderPath 'C:\\YOUR_REMOTE-DIR' `
+                                                -FilePrefix '${DB_NAME}' `
+                                                -DatabaseName '${DB_NAME}'
+                    """)
+                    if (restore_db_with_sqlcmd != 0) {
+                        error "PowerShell script failed with exit code: ${restore_db_with_sqlcmd}"
+                    }
+                } catch (Exception e) {
+                    currentBuild.result = 'FAILURE'
+                    error("Database restore failed: ${e.getMessage()}")
+                }
+            }
+        }
+    }
+
+
+    stage('ExecuteQueryDatabase') {
+        when {
+                expression { IS_CREATE && CHECK_MONDAY } // Proceed only if validity is less 
+            }         
+        steps {
+            script 
+            {
+                def targetIp = tfInstanceIp?.trim()
+                if (!targetIp) {
+                    error("IP address parameter is required")
+                }
+                echo "We got the Remote Server IP: ${targetIp}"
+                def DB_NAME = "${env.SELECTED_DB}"         
+                echo "Databse to Restore : ${DB_NAME}"
+                
+                try {
+
+                    // Variables to capture results
+                    def testResults = ""
+                    def prodResults = ""                    
+                    
+                    def restore_db_with_sqlcmd = powershell(returnStdout: true, script: """
+                        & '${EXECUTE_DB_SQL_CMD}' -RemoteServerIP '${targetIp}' `
+                                                -Username 'administrator' `
+                                                -RemoteFolderPath 'C:\\YOUR_REMOTE-DIR' `
+                                                -SQLFilePath '${SQL_QUERY_FILE}' `
+                                                -DatabaseName '${DB_NAME}'
+                    """)
+
+                    echo "Raw test output: ${restore_db_with_sqlcmd}"
+                    
+                    // Extract only the formatted table output from the PowerShell script
+                    testResults = extractTableOutput(restore_db_with_sqlcmd, "Restore Test")
+                    echo "Test Results captured: ${testResults}"
+                    
+                    if (restore_db_with_sqlcmd == null || restore_db_with_sqlcmd.isEmpty()) {
+                        error "PowerShell script failed - no output returned"
+                    }
+
+                    withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: 'YOUR_CREDENTIALS_ID_HERE', 
+                    usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']])
+                    {
+                        def restore_db_with_sqlcmd_prod = powershell(returnStdout: true, script: """
+                            & '${EXECUTE_DB_SQL_CMD_PROD}' -RemoteServerIP '${PROD_SQL_IP}' `
+                                                    -Username "${USERNAME}" `
+                                                    -Password (ConvertTo-SecureString '${PASSWORD}' -AsPlainText -Force) `
+                                                    -RemoteFolderPath 'C:\\YOUR_REMOTE-DIR' `
+                                                    -SQLFilePath '${SQL_QUERY_FILE}' `
+                                                    -DatabaseName '${DB_NAME}'
+                        """)
+                        
+                        echo "Raw production output: ${restore_db_with_sqlcmd_prod}"
+                        
+                        // Extract only the formatted table output from the PowerShell script
+                        prodResults = extractTableOutput(restore_db_with_sqlcmd_prod, "Production")
+                        echo "Production Results captured: ${prodResults}"
+                        
+                        if (restore_db_with_sqlcmd_prod == null || restore_db_with_sqlcmd_prod.isEmpty()) {
+                            error "Production PowerShell script failed - no output returned"
+                        }    
+
+                    }
+
+                    // Send email with results
+                    sendResultsEmail(testResults, prodResults)                    
+
+                } catch (Exception e) {
+                    currentBuild.result = 'FAILURE'
+                    error("Database restore failed: ${e.getMessage()}")
+                }
+            }
+        }
+    }
+
+
+    stage('RemoveTrustedHosts') {
+        when {
+                expression { IS_CREATE && CHECK_MONDAY} // Proceed only if validity is less 
+            }         
+        steps {
+            script {
+                def targetIp = tfInstanceIp?.trim()
+                if (!targetIp) {
+                    error("IP address parameter is required")
+                }
+                
+                try {
+                    // Execute the PowerShell script
+                    def result = bat(
+                        script: """
+                            aws sts get-caller-identity
+                            whoami
+                            powershell -ExecutionPolicy Bypass -File "${REMOVE_TRUSTED_HOSTS}" -IPAddress "${targetIp}"
+                        """,
+                        returnStatus: true,  // Return exit code instead of stdout
+                        label: "Removing ${targetIp} FROM trusted hosts"
+                    )
+                    
+                    
+                    // Check the exit code
+                    if (result != 0) {
+                        error("Failed to Remove IP from trusted hosts. PowerShell script exited with code: ${result}")
+                    }
+                    
+                    echo "Successfully Removed ${targetIp} From trusted hosts"
+                    
+                } catch (Exception e) {
+                    echo "ERROR: Failed to execute trusted hosts script: ${e.getMessage()}"
+                    echo "Target IP: ${targetIp}"
+                    echo "Script path: ${REMOVE_TRUSTED_HOSTS}"
+                    error("Removing Trusted hosts operation failed")
+                }
+            }
+        }
+    }    
+
+
+    stage('Destroy-Success'){
+        when {
+                expression { IS_CREATE && CHECK_MONDAY} // Proceed only if validity is less 
+            } 
+        steps{
+            script{
+                echo "Lets Destroy the Environment ! "
+                dir("terraform"){
+                    git (url: 'git@github.com:sarowar-alam/sarowar.git',branch: 'main',credentialsId: 'YOUR_CREDENTIALS_ID_HERE')
+                    
+                    // Terraform apply
+                    powershell """
+                        Write-Host "Working with path: ${env.TF_PATH}"
+                        Set-Location "${TF_PATH}"
+                        terraform init
+                        terraform destroy -auto-approve
+                    """
+                }
+            }
+        }
+    }
+
+
+
+    }
+
+    post {
+    always {
+        script {
+            try {
+                // Workspace cleanup
+                if (fileExists(env.WORKSPACE)) {
+                    echo "Cleaning up workspace: ${env.WORKSPACE}"
+                    deleteDir()
+                    cleanWs(
+                        cleanWhenNotBuilt: false,
+                        deleteDirs: true,
+                        disableDeferredWipeout: true,
+                        notFailBuild: true,
+                        patterns: [
+                            [pattern: '.gitignore', type: 'INCLUDE'],
+                            [pattern: '.propsfile', type: 'EXCLUDE']
+                        ]
+                    )
+                }
+            } catch (Exception e) {
+                echo "WARNING: Cleanup failed - ${e.message}"
+            }
+        }
+    }
+
+failure {
+    script {
+        try {
+            withCredentials([[
+                $class: 'UsernamePasswordMultiBinding',
+                credentialsId: 'YOUR_CREDENTIALS_ID_HERE',
+                usernameVariable: 'AWS_ACCESS_KEY_ID',
+                passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+            ]]) {
+                // Define recipients
+                def toRecipients = "'YOUR_NAME@YOUR_DOMAIN.COM'"
+                def ccRecipients = "'YOUR_NAME@YOUR_DOMAIN.COM'"
+                
+                // Get error message
+                def errorMsg = currentBuild.rawBuild.getLog(100).findAll { 
+                    it.contains('ERROR') || it.contains('FAIL') || it.contains('Exception') 
+                }.join('\n')
+                if (!errorMsg) {
+                    errorMsg = "No specific error message captured (check build logs)"
+                }
+
+                // Create the properly indented Python script
+                def pythonScript = """\
+import boto3
+import os
+
+def send_email_SES():
+    AWS_REGION = 'us-east-1'
+    SENDER_EMAIL = 'DevOps_Jankins_Automation <noreply@YOUR_DOMAIN.COM>'
+    TO_RECIPIENTS = [${toRecipients}]
+    CC_RECIPIENTS = [${ccRecipients}]
+    SUBJECT = 'FAILED: ${env.JOB_NAME.replace("'", "\\\\'")} #${env.BUILD_NUMBER}'
+    ERROR_MESSAGE = '''${errorMsg.replace("'", "\\\\'")}'''
+    
+    session = boto3.Session(
+        aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
+        aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY']
+    )
+    ses_client = session.client('ses', region_name=AWS_REGION)
+    
+    try:
+        response = ses_client.send_email(
+            Destination={
+                'ToAddresses': TO_RECIPIENTS,
+                'CcAddresses': CC_RECIPIENTS
+            },
+            Message={
+                'Body': {
+                    'Html': {
+                        'Charset': 'UTF-8',
+                        'Data': f'''<html>
+                            <body>
+                                <h2>Build Failed</h2>
+                                <p><strong>Job:</strong> ${env.JOB_NAME.replace("'", "\\\\'")}</p>
+                                <p><strong>Build:</strong> #${env.BUILD_NUMBER}</p>
+                                <p><strong>Console:</strong> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                                <hr>
+                                <h3>Error Details:</h3>
+                                <pre style="background:#f5f5f5;padding:10px;border-radius:5px;">{ERROR_MESSAGE}</pre>
+                            </body>
+                        </html>'''
+                    }
+                },
+                'Subject': {
+                    'Charset': 'UTF-8',
+                    'Data': SUBJECT
+                },
+            },
+            Source=SENDER_EMAIL,
+        )
+        print('Email sent! Message ID:', response['MessageId'])
+    except Exception as e:
+        print('Email sending failed:', str(e))
+        raise
+
+send_email_SES()
+""".stripIndent()
+
+                // Write and execute
+                writeFile file: 'send_email_temp.py', text: pythonScript
+                def output = bat(script: "python send_email_temp.py", returnStdout: true).trim()
+                echo "Email sending output: ${output}"
+                bat "del send_email_temp.py"
+                
+                if (output.contains("Email sending failed")) {
+                    error("Failed to send notification email")
+                }
+            }
+        } catch (Exception e) {
+            echo "ERROR: Failed to send failure notification - ${e.message}"
+        }
+    }
+}
+} // End of Post Cleanup and Mail of Failure 
+
+
+}
+
+// Improved function to extract table output from PowerShell script results
+def extractTableOutput(String powerShellOutput, String scriptType) {
+    if (!powerShellOutput) return "No output captured"
+    
+    echo "=== Searching for table in ${scriptType} output ==="
+    
+    // Look for the formatted table section using more flexible pattern matching
+    def lines = powerShellOutput.split('\r?\n')
+    def tableLines = []
+    def inTable = false
+    def borderCount = 0
+    
+    for (line in lines) {
+        def trimmedLine = line.trim()
+        
+        // Detect table borders - look for lines with multiple asterisks
+        if (trimmedLine.contains('************') || trimmedLine.matches('^\\*+$')) {
+            borderCount++
+            inTable = !inTable
+            echo "Border detected: ${trimmedLine} (borderCount: ${borderCount}, inTable: ${inTable})"
+            continue
+        }
+        
+        // If we're inside a table section and line has table content
+        if (inTable && borderCount >= 1 && trimmedLine.startsWith('*') && trimmedLine.endsWith('*')) {
+            // Clean the line by removing border characters and extra spaces
+            def cleanLine = trimmedLine.replaceAll('^\\*\\s*', '').replaceAll('\\s*\\*$', '').trim()
+            if (cleanLine && !cleanLine.contains('---') && !cleanLine.matches('^[-\\s]+$')) {
+                tableLines.add(cleanLine)
+                echo "Table line captured: ${cleanLine}"
+            }
+        }
+    }
+    
+    echo "Total table lines captured: ${tableLines.size()}"
+    
+    if (tableLines.isEmpty()) {
+        // Fallback: try to find any table-like data
+        def fallbackLines = []
+        lines.each { line ->
+            def trimmedLine = line.trim()
+            // Look for lines that contain pipe characters or look like table rows
+            if (trimmedLine.contains('|') || 
+                (trimmedLine.contains('TotalCount') && trimmedLine.contains('LastActivityId')) ||
+                trimmedLine.matches('.*\\d+\\s+\\d+.*')) {
+                fallbackLines.add(trimmedLine)
+            }
+        }
+        
+        if (!fallbackLines.isEmpty()) {
+            return fallbackLines.join('<br>')
+        }
+        
+        return "No table data found in output"
+    }
+    
+    return tableLines.join('<br>')
+}
+
+// Alternative simpler extraction function if the above doesn't work
+def extractTableOutputSimple(String powerShellOutput, String scriptType) {
+    if (!powerShellOutput) return "No output captured"
+    
+    echo "=== Using simple extraction for ${scriptType} ==="
+    
+    def lines = powerShellOutput.split('\r?\n')
+    def dataLines = []
+    
+    // Look for lines containing the data pattern (numbers separated by spaces)
+    lines.each { line ->
+        def trimmedLine = line.trim()
+        // Match lines that contain two numbers separated by spaces (like "41596          70573")
+        if (trimmedLine.matches('.*\\d+\\s+\\d+.*') && 
+            !trimmedLine.contains('---') && 
+            !trimmedLine.contains('TotalCount') &&
+            !trimmedLine.matches('^[\\*\\-\\s]+$')) {
+            dataLines.add(trimmedLine)
+            echo "Data line found: ${trimmedLine}"
+        }
+    }
+    
+    if (dataLines.isEmpty()) {
+        return "No data rows found in output"
+    }
+    
+    return dataLines.join('<br>')
+}
+
+// Function to send email with results
+def sendResultsEmail(String testResults, String prodResults) {
+    withCredentials([[
+        $class: 'UsernamePasswordMultiBinding',
+        credentialsId: 'YOUR_CREDENTIALS_ID_HERE',
+        usernameVariable: 'AWS_ACCESS_KEY_ID',
+        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+    ]]) {
+        // Define recipients
+        def toRecipients = "'YOUR_NAME@YOUR_DOMAIN.COM'"
+        def ccRecipients = "'YOUR_NAME@YOUR_DOMAIN.COM'"
+        
+        // Parse the results into structured data
+        def testTableData = parseTableData(testResults)
+        def prodTableData = parseTableData(prodResults)
+        
+        // Create HTML table for results
+        def htmlContent = """
+        <html>
+        <head>
+            <style>
+                body { font-family: WPP, sans-serif; margin: 20px; background-color: #f5f5f5; }
+                .container { background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+                .main-table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+                .main-table th, .main-table td { 
+                    border: 1px solid #ddd; 
+                    padding: 15px; 
+                    text-align: center; 
+                    vertical-align: top;
+                }
+                .main-table th { 
+                    background-color: #2c3e50; 
+                    color: white; 
+                    font-weight: bold; 
+                    font-size: 16px;
+                }
+                .test-column { background-color: #ecf0f1; }
+                .prod-column { background-color: #f8f9fa; }
+                .sub-table { 
+                    width: 100%; 
+                    border-collapse: collapse; 
+                    margin: 10px 0;
+                    font-family: 'Courier New', monospace;
+                    font-size: 12px;
+                }
+                .sub-table th, .sub-table td { 
+                    border: 1px solid #bdc3c7; 
+                    padding: 8px 12px; 
+                    text-align: center;
+                }
+                .sub-table th { 
+                    background-color: #34495e; 
+                    color: white; 
+                    font-weight: bold;
+                }
+                .sub-table tr:nth-child(even) { background-color: #f2f2f2; }
+                .sub-table tr:hover { background-color: #e3f2fd; }
+                .header-row { background-color: #3498db; color: white; }
+                .success-banner { 
+                    background-color: #27ae60; 
+                    color: white; 
+                    padding: 15px; 
+                    border-radius: 5px; 
+                    margin: 10px 0;
+                    text-align: center;
+                }
+                .timestamp { 
+                    color: #7f8c8d; 
+                    font-size: 12px; 
+                    text-align: center; 
+                    margin: 10px 0;
+                }
+                .no-data { 
+                    color: #e74c3c; 
+                    font-style: italic; 
+                    text-align: center;
+                    padding: 20px;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="success-banner">
+                    <h2>âœ“ Database ${env.SELECTED_DB} Restore Test Completed Successfully</h2>
+                </div>
+                
+                <div style="text-align: center; margin: 15px 0;">
+                    <p>
+                        Job: <strong>${env.JOB_NAME}</strong> | 
+                        Triggered By: <strong>#${env.TRIGGERED_BY}</strong> | 
+                        Build: <strong>#${env.BUILD_NUMBER}</strong> | 
+                        URL: <a href="${env.BUILD_URL}"><strong>View Build</strong></a>
+                    </p>
+                </div>
+
+
+                <table class="main-table">
+                    <tr class="header-row">
+                        <th width="50%">Query From Test Restore</th>
+                        <th width="50%">Query From Production DB</th>
+                    </tr>
+                    <tr>
+                        <td class="test-column">
+                            ${testTableData.isEmpty() ? '<div class="no-data">No data available</div>' : createSubTable(testTableData, 'Test')}
+                        </td>
+                        <td class="prod-column">
+                            ${prodTableData.isEmpty() ? '<div class="no-data">No data available</div>' : createSubTable(prodTableData, 'Production')}
+                        </td>
+                    </tr>
+                </table>
+                
+                <div class="timestamp">
+                    Generated on: ${new Date().format("yyyy-MM-dd HH:mm:ss")}
+                </div>
+            </div>
+        </body>
+        </html>
+        """.stripIndent()
+
+        // Create the Python script for sending email
+        def pythonScript = """\
+import boto3
+import os
+
+def send_email_SES():
+    AWS_REGION = 'us-east-1'
+    SENDER_EMAIL = 'DevOps_Automation DB Restore <noreply@YOUR_DOMAIN.COM>'
+    TO_RECIPIENTS = [${toRecipients}]
+    CC_RECIPIENTS = [${ccRecipients}]
+    SUBJECT = 'Restore Test: Database ${env.SELECTED_DB} Triggered By: ${env.TRIGGERED_BY} | ${env.JOB_NAME.replace("'", "\\\\'")} #${env.BUILD_NUMBER}'
+    
+    HTML_CONTENT = '''${htmlContent.replace("'", "\\\\'")}'''
+    
+    session = boto3.Session(
+        aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
+        aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY']
+    )
+    ses_client = session.client('ses', region_name=AWS_REGION)
+    
+    try:
+        response = ses_client.send_email(
+            Destination={
+                'ToAddresses': TO_RECIPIENTS,
+                'CcAddresses': CC_RECIPIENTS
+            },
+            Message={
+                'Body': {
+                    'Html': {
+                        'Charset': 'UTF-8',
+                        'Data': HTML_CONTENT
+                    }
+                },
+                'Subject': {
+                    'Charset': 'UTF-8',
+                    'Data': SUBJECT
+                },
+            },
+            Source=SENDER_EMAIL,
+        )
+        print('Email sent successfully! Message ID:', response['MessageId'])
+        return True
+    except Exception as e:
+        print('Email sending failed:', str(e))
+        return False
+
+if __name__ == "__main__":
+    success = send_email_SES()
+    exit(0 if success else 1)
+""".stripIndent()
+
+        // Write and execute the Python script
+        writeFile file: 'send_results_email.py', text: pythonScript
+        try {
+            def output = bat(script: "python send_results_email.py", returnStdout: true).trim()
+            echo "Email sending output: ${output}"
+            
+            if (output.contains("Email sending failed")) {
+                echo "WARNING: Failed to send results email, but continuing pipeline"
+            } else {
+                echo "Results email sent successfully"
+            }
+        } catch (Exception e) {
+            echo "WARNING: Failed to send email - ${e.message}, but continuing pipeline"
+        } finally {
+            bat "del send_results_email.py 2>nul || exit 0"
+        }
+    }
+}
+
+// Function to parse table data from the formatted string
+def parseTableData(String tableOutput) {
+    def rows = []
+    
+    if (!tableOutput || tableOutput == "No table data found") {
+        return rows
+    }
+    
+    // Split the output into lines
+    def lines = tableOutput.split('<br>')
+    
+    // Look for data rows (lines containing numbers)
+    lines.each { line ->
+        def trimmedLine = line.trim()
+        // Match lines with two numbers separated by spaces
+        if (trimmedLine.matches('.*\\d+\\s+\\d+.*')) {
+            // Extract numbers using regex
+            def numbers = trimmedLine.replaceAll('[^\\d\\s]', '').trim().split('\\s+')
+            if (numbers.size() >= 2) {
+                rows.add([totalCount: numbers[0], lastActivityId: numbers[1]])
+            }
+        }
+    }
+    
+    return rows
+}
+
+// Function to create HTML sub-table
+def createSubTable(List tableData, String environment) {
+    def html = """
+    <div style="text-align: center; margin-bottom: 10px;">
+        <strong>${environment} Environment</strong>
+    </div>
+    <table class="sub-table">
+        <thead>
+            <tr>
+                <th>TotalCount</th>
+                <th>LastActivityId</th>
+            </tr>
+        </thead>
+        <tbody>
+    """
+    
+    tableData.each { row ->
+        html += """
+            <tr>
+                <td>${row.totalCount}</td>
+                <td>${row.lastActivityId}</td>
+            </tr>
+        """
+    }
+    
+    html += """
+        </tbody>
+    </table>
+    <div style="text-align: center; margin-top: 10px; font-size: 11px; color: #666;">
+        Total records: ${tableData.size()}
+    </div>
+    """
+    
+    return html
+}
+
+
+modules\ec2-windows-sql\main.tf
+===============================
+# Find the latest Windows 2019 with SQL Server 2022 Standard AMI
+data "aws_ami" "windows_sql_2022" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["Windows_Server-2019-English-Full-SQL_2022_Standard-*"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
+# Create key pair
+resource "aws_key_pair" "windows_key" {
+  key_name   = var.key_name
+  public_key = tls_private_key.rsa.public_key_openssh
+}
+
+# Generate RSA key
+resource "tls_private_key" "rsa" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+# Save private key to file
+resource "local_file" "private_key" {
+  content         = tls_private_key.rsa.private_key_pem
+  filename        = "${var.key_name}.pem"
+  file_permission = "0600"
+}
+
+# Security group for RDP access
+resource "aws_security_group" "windows_sg" {
+  name        = "windows-sql-sg"
+  description = "Security group for Windows SQL Server"
+  vpc_id      = var.vpc_id
+
+  # RDP access from allowed IPs
+  ingress {
+    from_port   = 3389
+    to_port     = 3389
+    protocol    = "tcp"
+    cidr_blocks = var.allowed_ips
+    description = "RDP access from allowed IPs"
+  }
+
+  # WinRM access from allowed IPs
+  ingress {
+    from_port   = 5985
+    to_port     = 5985
+    protocol    = "tcp"
+    cidr_blocks = var.winrm_ips
+    description = "WinRM access from WinRM IPs"
+  }
+
+  # WinRM HTTPS access
+  ingress {
+    from_port   = 5986
+    to_port     = 5986
+    protocol    = "tcp"
+    cidr_blocks = var.winrm_ips
+    description = "WinRM HTTPS access"
+  }
+
+  # Outbound traffic
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow all outbound traffic"
+  }
+
+  tags = {
+    Name = "windows-sql-security-group"
+  }
+}
+
+# EC2 instance
+resource "aws_instance" "windows_sql_server" {
+  ami               = data.aws_ami.windows_sql_2022.id
+  instance_type     = var.instance_type
+  subnet_id         = var.subnet_id
+  key_name          = aws_key_pair.windows_key.key_name
+  vpc_security_group_ids = [aws_security_group.windows_sg.id]
+  user_data         = data.template_file.user_data.rendered
+  iam_instance_profile = var.ec2_instance_role_arn != null ? var.ec2_instance_role_arn : null
+
+  # Root block device with dynamic configuration
+  root_block_device {
+    volume_type = var.volume_type
+    volume_size = var.volume_size
+    iops        = var.iops > 0 ? var.iops : null
+    throughput  = var.throughput > 0 ? var.throughput : null
+    encrypted   = true
+    
+    tags = {
+      Name = "${var.instance_name}-root-volume"
+    }
+  }
+
+  tags = {
+    Name = var.instance_name
+  }
+
+  # Get administrator password from AWS Systems Manager Parameter Store
+  get_password_data = true
+}
+
+# User data template for AWS CLI installation and WinRM configuration
+data "template_file" "user_data" {
+  template = <<-EOF
+<powershell>
+# Set execution policy
+Set-ExecutionPolicy RemoteSigned -Force
+
+# Install AWS CLI
+Write-Host "Installing AWS CLI..."
+$awsCliUrl = "https://awscli.amazonaws.com/AWSCLIV2.msi"
+$installerPath = "$env:TEMP\AWSCLIV2.msi"
+
+# Download and install AWS CLI
+Invoke-WebRequest -Uri $awsCliUrl -OutFile $installerPath
+Start-Process msiexec.exe -Wait -ArgumentList "/i $installerPath /quiet /norestart"
+Remove-Item $installerPath -Force
+
+# Configure WinRM for remote management
+Write-Host "Configuring WinRM..."
+
+# Enable PSRemoting with proper authentication
+Enable-PSRemoting -Force -SkipNetworkProfileCheck
+
+# Configure WinRM service to start automatically
+Set-Service -Name WinRM -StartupType Automatic
+Start-Service -Name WinRM
+
+# Configure WinRM for basic authentication (required for Packer/remote management)
+winrm set winrm/config/service '@{AllowUnencrypted="true"}'
+winrm set winrm/config/service/auth '@{Basic="true"}'
+winrm set winrm/config/client/auth '@{Basic="true"}'
+
+# Disable no authentication mode to avoid conflicts
+winrm set winrm/config/service/auth '@{Negotiate="true"}'
+winrm set winrm/config/service/auth '@{Certificate="false"}'
+
+# Configure firewall rules for WinRM
+netsh advfirewall firewall add rule name="WinRM HTTP" dir=in action=allow protocol=TCP localport=5985
+netsh advfirewall firewall add rule name="WinRM HTTPS" dir=in action=allow protocol=TCP localport=5986
+
+# Set trusted hosts to allow connections from any host (for initial setup)
+Set-Item WSMan:\localhost\Client\TrustedHosts "*" -Force
+
+# Configure WinRM listener properly
+winrm delete winrm/config/listener?Address=*+Transport=HTTP 2>$null
+winrm create winrm/config/listener?Address=*+Transport=HTTP
+
+# Configure service to allow remote access
+winrm set winrm/config/service '@{EnableCompatibilityHttpListener="true"}'
+winrm set winrm/config/service '@{EnableCompatibilityHttpsListener="true"}'
+
+# Restart WinRM service to apply changes
+Restart-Service WinRM -Force
+
+# Verify WinRM configuration
+Write-Host "WinRM configuration status:"
+winrm enumerate winrm/config/listener
+Write-Host "WinRM service status:"
+Get-Service WinRM | Format-Table Name, Status, StartType
+Write-Host "WinRM authentication settings:"
+winrm get winrm/config/service/auth
+winrm get winrm/config/client/auth
+
+# Set environment variables for AWS CLI
+[System.Environment]::SetEnvironmentVariable("AWS_DEFAULT_REGION", "${var.region}", [System.EnvironmentVariableTarget]::Machine)
+
+Write-Host "AWS CLI installation and WinRM configuration completed successfully!"
+
+# Test WinRM connectivity locally
+try {
+    $testResult = Test-WSMan -ErrorAction Stop
+    Write-Host "WinRM self-test successful: $($testResult | Out-String)"
+} catch {
+    Write-Host "WinRM self-test failed: $_"
+}
+
+# Optional: Test AWS CLI installation
+try {
+    $awsVersion = aws --version
+    Write-Host "AWS CLI Version: $awsVersion"
+} catch {
+    Write-Host "AWS CLI test failed: $_"
+}
+
+# Write completion marker
+Write-Host "User data execution completed at $(Get-Date)"
+</powershell>
+EOF
+}
+
+# Output the decrypted password using AWS CLI (after instance creation)
+resource "null_resource" "get_password" {
+  depends_on = [aws_instance.windows_sql_server]
+
+  triggers = {
+    instance_id = aws_instance.windows_sql_server.id
+  }
+
+provisioner "local-exec" {
+  interpreter = ["PowerShell", "-Command"]
+  command = <<-EOT
+    # Assume the IAM role and get temporary credentials
+    $assumeRoleOutput = aws sts assume-role --role-arn "${var.terraform_role_arn}" --role-session-name "terraform-password-retrieval"
+    
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Error assuming role: ${var.terraform_role_arn}"
+        exit 1
+    }
+    
+    # Parse the JSON response to extract credentials
+    $credentials = $assumeRoleOutput | ConvertFrom-Json
+    $env:AWS_ACCESS_KEY_ID = $credentials.Credentials.AccessKeyId
+    $env:AWS_SECRET_ACCESS_KEY = $credentials.Credentials.SecretAccessKey
+    $env:AWS_SESSION_TOKEN = $credentials.Credentials.SessionToken
+    
+    $maxAttempts = 20
+    $attempt = 1
+    $success = $false
+    $delaySeconds = 30
+
+    while ($attempt -le $maxAttempts -and -not $success) {
+        Write-Host "Attempt $attempt of $maxAttempts to retrieve password..."
+        
+        try {
+            $output = aws ec2 get-password-data `
+              --instance-id ${aws_instance.windows_sql_server.id} `
+              --priv-launch-key ${var.key_name}.pem `
+              --region ${var.region} `
+              --query PasswordData `
+              --output text
+            
+            if (-not [string]::IsNullOrEmpty($output)) {
+                $output | Out-File -FilePath "password.txt" -Encoding UTF8
+                Write-Host "Password successfully retrieved and saved to password.txt"
+                $success = $true
+                break
+            } else {
+                Write-Host "Password data is empty, retrying in $delaySeconds seconds..."
+            }
+        }
+        catch {
+            Write-Host "Error retrieving password (Attempt $attempt): $($_.Exception.Message)"
+        }
+        
+        if ($attempt -lt $maxAttempts -and -not $success) {
+            Write-Host "Waiting $delaySeconds seconds before next attempt..."
+            Start-Sleep -Seconds $delaySeconds
+        }
+        
+        $attempt++
+    }
+
+    # Clean up environment variables
+    $env:AWS_ACCESS_KEY_ID = $null
+    $env:AWS_SECRET_ACCESS_KEY = $null
+    $env:AWS_SESSION_TOKEN = $null
+
+    if (-not $success) {
+        Write-Host "Failed to retrieve password after $maxAttempts attempts. The instance may still be initializing."
+        Write-Host "You can manually retrieve the password later using:"
+        Write-Host "aws ec2 get-password-data --instance-id ${aws_instance.windows_sql_server.id} --priv-launch-key ${var.key_name}.pem --region ${var.region} --query PasswordData --output text"
+        exit 1
+    }
+  EOT
+}
+}
+
+
+modules\ec2-windows-sql\outputs.tf
+==================================
+output "instance_public_ip" {
+  description = "Public IP address of the Windows SQL Server instance"
+  value       = aws_instance.windows_sql_server.public_ip
+}
+
+output "instance_id" {
+  description = "ID of the Windows SQL Server instance"
+  value       = aws_instance.windows_sql_server.id
+}
+
+output "key_pair_name" {
+  description = "Name of the generated key pair"
+  value       = aws_key_pair.windows_key.key_name
+}
+
+output "rdp_connection_command" {
+  description = "RDP connection command"
+  value       = "mstsc /v:${aws_instance.windows_sql_server.public_ip}"
+}
+
+output "private_key_filename" {
+  description = "Filename of the generated private key"
+  value       = "${var.key_name}.pem"
+  sensitive   = true
+}
+
+
+modules\ec2-windows-sql\variables.tf
+====================================
+variable "vpc_id" {
+  description = "VPC ID"
+  type        = string
+}
+
+variable "subnet_id" {
+  description = "Subnet ID"
+  type        = string
+}
+
+variable "allowed_ips" {
+  description = "List of allowed IP addresses for RDP access"
+  type        = list(string)
+}
+
+variable "winrm_ips" {
+  description = "List of allowed IP addresses for WinRM access"
+  type        = list(string)
+}
+
+variable "ec2_instance_role_arn" {
+  description = "ARN of an existing IAM role to attach to the EC2 instance (e.g., arn:aws:iam::123456789123:role/db-restore)"
+  type        = string
+  default     = null
+}
+
+
+variable "key_name" {
+  description = "Name of the key pair"
+  type        = string
+}
+
+variable "instance_name" {
+  description = "Name tag for the EC2 instance"
+  type        = string
+}
+
+variable "instance_type" {
+  description = "EC2 instance type"
+  type        = string
+}
+
+variable "volume_size" {
+  description = "Root volume size in GiB"
+  type        = number
+}
+
+variable "volume_type" {
+  description = "Root volume type"
+  type        = string
+  default     = "gp3"
+}
+
+variable "iops" {
+  description = "IOPS for the volume"
+  type        = number
+  default     = 0
+}
+
+variable "throughput" {
+  description = "Throughput for the volume in MB/s"
+  type        = number
+  default     = 0
+}
+
+variable "region" {
+  description = "AWS region"
+  type        = string
+}
+
+variable "terraform_role_arn" {
+  description = "ARN of the role for Terraform to assume for resource operations"
+  type        = string
+  default     = null
+}
+
+
+modules\vpc\main.tf
+===================
+resource "aws_vpc" "main" {
+  cidr_block           = var.vpc_cidr
+  enable_dns_support   = true
+  enable_dns_hostnames = true
+
+  tags = {
+    Name = "windows-sql-vpc"
+  }
+}
+
+resource "aws_subnet" "public" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = var.public_subnet_cidr
+  availability_zone       = "${var.region}${var.availability_zone}"
+  map_public_ip_on_launch = true
+
+  tags = {
+    Name = "public-subnet"
+  }
+}
+
+resource "aws_internet_gateway" "main" {
+  vpc_id = aws_vpc.main.id
+
+  tags = {
+    Name = "main-igw"
+  }
+}
+
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.main.id
+  }
+
+  tags = {
+    Name = "public-route-table"
+  }
+}
+
+resource "aws_route_table_association" "public" {
+  subnet_id      = aws_subnet.public.id
+  route_table_id = aws_route_table.public.id
+}
+
+
+modules\vpc\outputs.tf
+======================
+output "vpc_id" {
+  description = "ID of the VPC"
+  value       = aws_vpc.main.id
+}
+
+output "public_subnet_id" {
+  description = "ID of the public subnet"
+  value       = aws_subnet.public.id
+}
+
+output "internet_gateway_id" {
+  description = "ID of the Internet Gateway"
+  value       = aws_internet_gateway.main.id
+}
+
+
+modules\vpc\variables.tf
+========================
+variable "vpc_cidr" {
+  description = "CIDR block for the VPC"
+  type        = string
+}
+
+variable "public_subnet_cidr" {
+  description = "CIDR block for the public subnet"
+  type        = string
+}
+
+variable "region" {
+  description = "AWS region"
+  type        = string
+}
+
+variable "availability_zone" {
+  description = "Availability zone for the subnet"
+  type        = string
+  default     = "a"
+}
+
+
+scripts\add-trusted-host.ps1
+============================
+param(
+    [string]$IPAddress = ''
+)
+
+# Enhanced logging function
+function Write-Log {
+    param(
+        [string]$Message,
+        [string]$Level = "INFO",
+        [string]$Color = "White"
+    )
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logMessage = "[$timestamp] [$Level] $Message"
+    Write-Host $logMessage -ForegroundColor $Color
+}
+
+# Function to parse trusted hosts string into individual entries
+function Get-TrustedHostsEntries {
+    param([string]$TrustedHostsString)
+    
+    if ([string]::IsNullOrEmpty($TrustedHostsString)) {
+        return @()
+    }
+    
+    # Split by comma and remove empty/whitespace entries, then trim each entry
+    $entries = $TrustedHostsString -split ',' | 
+               Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | 
+               ForEach-Object { $_.Trim() }
+    
+    return $entries
+}
+
+# Function to check if IP is already in trusted hosts
+function Test-IPInTrustedHosts {
+    param(
+        [string]$IPToCheck,
+        [string]$TrustedHostsString
+    )
+    
+    $entries = Get-TrustedHostsEntries $TrustedHostsString
+    
+    foreach ($entry in $entries) {
+        # Exact match check
+        if ($entry -eq $IPToCheck) {
+            return $true
+        }
+        
+        # Check for IP in wildcard patterns (e.g., "192.168.*")
+        if ($entry -like "*`**" -and $IPToCheck -like $entry.Replace('*', '%')) {
+            return $true
+        }
+    }
+    
+    return $false
+}
+
+# Function to clear/kill all PSSessions
+function Clear-AllPSSessions {
+    Write-Log "Clearing all active PowerShell sessions..." "INFO" "Yellow"
+    try {
+        $sessions = Get-PSSession
+        if ($sessions.Count -gt 0) {
+            Write-Log "Found $($sessions.Count) active session(s)" "INFO" "Gray"
+            $sessions | Remove-PSSession -ErrorAction Stop
+            Write-Log "Successfully cleared all PowerShell sessions" "SUCCESS" "Green"
+        } else {
+            Write-Log "No active PowerShell sessions found" "INFO" "Gray"
+        }
+    }
+    catch {
+        Write-Log "WARNING: Error clearing sessions: $($_.Exception.Message)" "WARNING" "Yellow"
+    }
+}
+
+# Configuration
+$backupDir = "C:\backup"
+$dateStamp = Get-Date -Format "yyyy_MM_dd_HH_mm"
+$backupFile = "$backupDir\TrustedHosts_$dateStamp.txt"
+
+Write-Log "Starting Trusted Hosts update operation" "INFO" "Cyan"
+Write-Log "Target IP: $IPAddress" "INFO" "Cyan"
+Write-Log "Backup file: $backupFile" "INFO" "Cyan"
+
+# Validate IP address format
+try {
+    Write-Log "Validating IP address format..." "INFO" "Gray"
+    if ([string]::IsNullOrWhiteSpace($IPAddress)) {
+        throw "IP address cannot be empty"
+    }
+    
+    # Basic IP validation (can be IPv4, IPv6, or hostname)
+    if ($IPAddress -notmatch '^[a-zA-Z0-9\.\:\-\*]+$') {
+        throw "Invalid IP address format: $IPAddress"
+    }
+    
+    Write-Log "IP address format validation passed" "SUCCESS" "Green"
+}
+catch {
+    Write-Log "IP VALIDATION ERROR: $($_.Exception.Message)" "ERROR" "Red"
+    exit 1
+}
+
+# Clear all active PowerShell sessions before making changes
+Clear-AllPSSessions
+
+# Ensure backup directory exists
+Write-Log "Checking backup directory existence..." "INFO" "Gray"
+if (!(Test-Path $backupDir)) {
+    try {
+        Write-Log "Creating backup directory: $backupDir" "INFO" "Yellow"
+        $null = New-Item -Path $backupDir -ItemType Directory -Force
+        Write-Log "Backup directory created successfully" "SUCCESS" "Green"
+    }
+    catch {
+        Write-Log "CRITICAL: Error creating backup directory: $($_.Exception.Message)" "ERROR" "Red"
+        Write-Log "Operation aborted - cannot proceed without backup directory" "ERROR" "Red"
+        exit 1
+    }
+} else {
+    Write-Log "Backup directory already exists" "INFO" "Gray"
+}
+
+# Backup current trusted hosts
+Write-Log "Starting backup of current trusted hosts..." "INFO" "Cyan"
+try {
+    $currentTrustedHosts = (Get-Item WSMan:\localhost\Client\TrustedHosts -ErrorAction Stop).Value
+    
+    if ([string]::IsNullOrEmpty($currentTrustedHosts)) {
+        $backupContent = "No trusted hosts configured as of $((Get-Date).ToString())"
+        Write-Log "No existing trusted hosts found" "INFO" "Yellow"
+    }
+    else {
+        $backupContent = "$currentTrustedHosts`r`n# Backup created on: $(Get-Date)"
+        Write-Log "Current trusted hosts retrieved: $currentTrustedHosts" "INFO" "Yellow"
+        
+        # Check for duplicate IP before proceeding
+        Write-Log "Checking if IP address is already in trusted hosts..." "INFO" "Gray"
+        $isDuplicate = Test-IPInTrustedHosts -IPToCheck $IPAddress -TrustedHostsString $currentTrustedHosts
+        
+        if ($isDuplicate) {
+            Write-Log "IP address $IPAddress is already in trusted hosts list" "WARNING" "Yellow"
+            Write-Log "No changes needed - operation completed" "INFO" "Green"
+            
+            # Still create backup even if no changes are made
+            $backupContent | Out-File -FilePath $backupFile -Encoding UTF8 -Force
+            Write-Log "Backup created at: $backupFile" "INFO" "Green"
+            
+            # Clear sessions again before exiting
+            Clear-AllPSSessions
+            exit 0
+        } else {
+            Write-Log "IP address $IPAddress is not in trusted hosts list - proceeding with addition" "INFO" "Green"
+        }
+    }
+    
+    # Create backup file with force to overwrite if exists
+    $backupContent | Out-File -FilePath $backupFile -Encoding UTF8 -Force
+    Write-Log "Backup completed successfully: $backupFile" "SUCCESS" "Green"
+    
+    # Verify file was actually created
+    if (Test-Path $backupFile) {
+        $fileInfo = Get-Item $backupFile
+        Write-Log "Backup file verified: $($fileInfo.FullName)" "SUCCESS" "Green"
+        Write-Log "File size: $($fileInfo.Length) bytes" "INFO" "Gray"
+    } else {
+        Write-Log "WARNING: Backup file creation may have failed - file not found" "WARNING" "Yellow"
+    }
+}
+catch [System.Management.Automation.ItemNotFoundException] {
+    Write-Log "WSMan TrustedHosts path not found. This might be expected if never configured." "INFO" "Yellow"
+    $backupContent = "WSMan TrustedHosts path not found - likely never configured as of $(Get-Date)"
+    
+    # Create backup file with force
+    $backupContent | Out-File -FilePath $backupFile -Encoding UTF8 -Force
+    Write-Log "Backup created for non-existent configuration: $backupFile" "INFO" "Yellow"
+    
+    # Verify file creation
+    if (Test-Path $backupFile) {
+        Write-Log "Backup file verified" "SUCCESS" "Green"
+    }
+}
+catch [System.UnauthorizedAccessException] {
+    Write-Log "ACCESS DENIED: Insufficient permissions to read WSMan configuration" "ERROR" "Red"
+    Write-Log "Please run PowerShell as Administrator" "ERROR" "Red"
+    exit 1
+}
+catch {
+    Write-Log "UNEXPECTED ERROR during backup: $($_.Exception.Message)" "ERROR" "Red"
+    Write-Log "Error type: $($_.Exception.GetType().Name)" "ERROR" "Red"
+    exit 1
+}
+
+# If we reached here and there are existing trusted hosts, we already checked for duplicates
+# If there are no existing trusted hosts, we need to add the IP
+if ([string]::IsNullOrEmpty($currentTrustedHosts)) {
+    Write-Log "No existing trusted hosts - IP will be added as first entry" "INFO" "Yellow"
+}
+
+# Add new IP to trusted hosts
+Write-Log "Attempting to add IP address to trusted hosts..." "INFO" "Cyan"
+try {
+    Write-Log "Adding IP: $IPAddress" "INFO" "Gray"
+    
+    # Check if we're running as administrator (required for this operation)
+    $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
+    if (-not $isAdmin) {
+        throw "Administrator privileges required. Please run PowerShell as Administrator."
+    }
+    
+    # Add the IP to the trusted hosts list
+    Set-Item WSMan:\localhost\Client\TrustedHosts -Value $IPAddress -Concatenate -Force
+    # Restart WinRM to apply changes immediately
+    Write-Host "Restarting WinRM service..." -ForegroundColor Cyan
+    Restart-Service WinRM -Force
+
+    # Remove any active PowerShell remoting sessions
+    Write-Host "Clearing any active PowerShell sessions..." -ForegroundColor Cyan
+    Get-PSSession | Remove-PSSession -ErrorAction SilentlyContinue
+
+
+    # Verify the update
+    $updatedList = (Get-Item WSMan:\localhost\Client\TrustedHosts -ErrorAction Stop).Value
+    Write-Log "Update successful! New trusted hosts list: $updatedList" "SUCCESS" "Green"
+    
+    # Additional verification - check if IP was actually added
+    $finalEntries = Get-TrustedHostsEntries $updatedList
+    $ipAdded = $false
+    
+    foreach ($entry in $finalEntries) {
+        if ($entry -eq $IPAddress) {
+            $ipAdded = $true
+            break
+        }
+    }
+    
+    if ($ipAdded) {
+        Write-Log "IP address $IPAddress confirmed in trusted hosts list" "SUCCESS" "Green"
+    } else {
+        Write-Log "WARNING: IP address may not have been added correctly" "WARNING" "Yellow"
+    }
+    
+    # Test network connection to the remote server on WinRM port (5985)
+    Write-Log "Testing network connection to $IPAddress on port 5985..." "INFO" "Gray"
+    
+    $maxRetries = 20
+    $retryDelay = 30
+    $retryCount = 0
+    $connectionSuccessful = $false
+
+    do {
+        $retryCount++
+        try {
+            Write-Log "Attempting connection test to $IPAddress on port 5985 (Attempt $retryCount of $maxRetries)..." "INFO" "Gray"
+            
+            $connectionTest = Test-NetConnection -ComputerName $IPAddress -Port 5985 -InformationLevel Detailed -ErrorAction Stop
+            
+            if ($connectionTest.TcpTestSucceeded) {
+                Write-Log "SUCCESS: Network connection to $IPAddress on port 5985 is available" "SUCCESS" "Green"
+                Write-Log "Ping reply: $($connectionTest.PingSucceeded)" "INFO" "Gray"
+                Write-Log "Roundtrip time: $($connectionTest.RoundtripTime)ms" "INFO" "Gray"
+                $connectionSuccessful = $true
+                break
+            } else {
+                Write-Log "WARNING: Cannot connect to $IPAddress on port 5985. WinRM may not be accessible." "WARNING" "Yellow"
+                Write-Log "Ping result: $($connectionTest.PingSucceeded)" "INFO" "Gray"
+            }
+        } catch {
+            Write-Log "ERROR: Connection test failed: $($_.Exception.Message)" "ERROR" "Red"
+        }
+        
+        # Only wait if we're going to try again
+        if ($retryCount -lt $maxRetries -and -not $connectionSuccessful) {
+            Write-Log "Waiting $retryDelay seconds before next attempt..." "INFO" "Gray"
+            Start-Sleep -Seconds $retryDelay
+        }
+        
+    } while ($retryCount -lt $maxRetries -and -not $connectionSuccessful)
+
+    if (-not $connectionSuccessful) {
+        Write-Log "CRITICAL: Failed to establish connection to $IPAddress after $maxRetries attempts" "ERROR" "Red"
+    }
+
+}
+catch [System.UnauthorizedAccessException] {
+    Write-Log "ACCESS DENIED: Administrator privileges required to modify WSMan configuration" "ERROR" "Red"
+    Write-Log "Please run PowerShell as Administrator and try again" "ERROR" "Red"
+    Write-Log "Backup was successfully created at: $backupFile" "INFO" "Yellow"
+    exit 1
+}
+catch [System.Management.Automation.PSArgumentException] {
+    Write-Log "INVALID INPUT: The IP address format may be incorrect: $IPAddress" "ERROR" "Red"
+    Write-Log "Please verify the IP address format" "ERROR" "Red"
+    exit 1
+}
+catch {
+    Write-Log "UNEXPECTED ERROR during update: $($_.Exception.Message)" "ERROR" "Red"
+    Write-Log "Error type: $($_.Exception.GetType().Name)" "ERROR" "Red"
+    Write-Log "Backup was successfully created at: $backupFile" "INFO" "Yellow"
+    exit 1
+}
+
+# Clear all active PowerShell sessions after making changes
+Clear-AllPSSessions
+
+Write-Log "Operation completed successfully!" "SUCCESS" "Green"
+Write-Log "Backup location: $backupFile" "INFO" "Gray"
+Write-Log "Final trusted hosts: $updatedList" "INFO" "Gray"
+
+# Final verification that backup file exists
+if (Test-Path $backupFile) {
+    Write-Log "Final verification: Backup file exists at $backupFile" "SUCCESS" "Green"
+} else {
+    Write-Log "ERROR: Backup file was not created successfully" "ERROR" "Red"
+}
+
+
+scripts\download-s3-backup-remote.ps1
+=====================================
+param (
+    [string]$RemoteServer,      # Remote server IP
+    [string]$Username,          # Remote username
+    [string]$S3BucketName,      # S3 bucket name
+    [string]$S3Prefix,          # S3 prefix/folder path
+    [string]$DBName,            # Database name to match in filename
+    [string]$RemoteDirectory    # Remote directory to download to
+)
+
+
+try {
+
+    # Convert plain text password to SecureString (handles special characters)
+    Write-Host "[INFO] Converting password to SecureString" -ForegroundColor Green
+    $passwordFilePath = "Automated-MS-SQL-Backup-Restore-Job\password.txt"
+    if (-not (Test-Path $passwordFilePath)) {
+        throw "Password file not found at: $passwordFilePath"
+    }
+    $fileContent = Get-Content $passwordFilePath -Raw
+    $password = ($fileContent -replace '[^\x00-\x7F]', '').Trim()
+    if ([string]::IsNullOrEmpty($password)) {
+        throw "Password file contains no valid ASCII characters after cleaning"
+    }
+    $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+    Write-Host "Password successfully converted to secure string Where UserName is $Username" -ForegroundColor Green   
+
+    $Credential = New-Object System.Management.Automation.PSCredential ($Username, $securePassword)
+ 
+    Write-Host "[INFO] Connecting to remote server: $RemoteServer" -ForegroundColor Green
+    Write-Host "[INFO] Target S3 Bucket: $S3BucketName" -ForegroundColor Green
+    Write-Host "[INFO] S3 Prefix: $S3Prefix" -ForegroundColor Green
+    Write-Host "[INFO] Database Name Filter: $DBName" -ForegroundColor Green
+    Write-Host "[INFO] Remote Download Directory: $RemoteDirectory" -ForegroundColor Green
+
+    # Execute the remote script directly without using Invoke-Expression
+    Write-Host "[INFO] Executing remote S3 download operation via WinRM..." -ForegroundColor Cyan
+
+    #######
+    # Retry configuration
+    $maxRetries = 15
+    $retryDelay = 30
+    $retryCount = 0
+    $connected = $false
+
+    do {
+        try {
+            $retryCount++
+            Write-Host "[INFO] Attempting WinRM connection (Attempt $retryCount/$maxRetries)..." -ForegroundColor Yellow
+            
+            $result = Invoke-Command -ComputerName $RemoteServer -Credential $Credential -ScriptBlock {
+                param ($S3BucketName, $S3Prefix, $DBName, $RemoteDirectory)
+                
+                $ErrorActionPreference = 'Stop'
+                $ProgressPreference = 'SilentlyContinue'
+                
+                # Function for consistent logging
+                function Write-Log {
+                    param([string]$Message, [string]$Level = "INFO")
+                    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+                    $formattedMessage = "[$timestamp] [$Level] $Message"
+                    
+                    switch ($Level) {
+                        "ERROR" { Write-Host $formattedMessage -ForegroundColor Red }
+                        "WARN"  { Write-Host $formattedMessage -ForegroundColor Yellow }
+                        "INFO"  { Write-Host $formattedMessage -ForegroundColor Green }
+                        "DEBUG" { Write-Host $formattedMessage -ForegroundColor Gray }
+                        default { Write-Host $formattedMessage -ForegroundColor White }
+                    }
+                }
+
+                try {
+                    Write-Log "Starting S3 backup download process"
+
+                    # Create remote directory if it doesn't exist
+                    Write-Log "Ensuring remote directory exists: $RemoteDirectory"
+                    if (-not (Test-Path $RemoteDirectory)) {
+                        try {
+                            New-Item -ItemType Directory -Path $RemoteDirectory -Force | Out-Null
+                            Write-Log "Created directory: $RemoteDirectory" "INFO"
+                        } catch {
+                            $errorMsg = $_.Exception.Message
+                            throw ("Failed to create directory " + $RemoteDirectory + ": " + $errorMsg)
+                        }
+                    }
+
+                    # List objects in S3 bucket with prefix
+                    Write-Log "Listing objects in S3 bucket: $S3BucketName with prefix: $S3Prefix"
+                    
+                    $listCommand = "aws s3api list-objects-v2 --bucket $S3BucketName --prefix $S3Prefix --query 'Contents[].{Key:Key, Size:Size, LastModified:LastModified}' --output json"
+                    Write-Log "Executing: $listCommand" "DEBUG"
+                    
+                    $s3ObjectsJson = Invoke-Expression $listCommand 2>&1
+                    if ($LASTEXITCODE -ne 0) {
+                        throw "Failed to list S3 objects. AWS CLI error: $s3ObjectsJson"
+                    }
+
+                    if ([string]::IsNullOrEmpty($s3ObjectsJson) -or $s3ObjectsJson -eq "null") {
+                        throw "No objects found in S3 bucket $S3BucketName with prefix $S3Prefix"
+                    }
+
+                    $s3Objects = $s3ObjectsJson | ConvertFrom-Json
+                    Write-Log "Found $($s3Objects.Count) objects in S3 bucket" "INFO"
+
+                    # Filter objects that start with the DB name
+                    Write-Log "Filtering objects starting with DB name: $DBName"
+                    $filteredObjects = $s3Objects | Where-Object {
+                        $_.Key -match "$($DBName)[^/]*$" -and
+                        $_.Key -notmatch "/$"  # Exclude directories
+                    }
+
+                    if (-not $filteredObjects -or $filteredObjects.Count -eq 0) {
+                        throw "No files found starting with DB name: $DBName in the specified S3 location"
+                    }
+
+                    Write-Log "Found $($filteredObjects.Count) files matching DB name pattern" "INFO"
+
+                    # Sort by last modified date (newest first) and get the latest
+                    $latestBackup = $filteredObjects | Sort-Object LastModified -Descending | Select-Object -First 1
+                    
+                    Write-Log "Latest backup file: $($latestBackup.Key)" "INFO"
+                    Write-Log "Last modified: $($latestBackup.LastModified)" "INFO"
+                    Write-Log "Size: $([math]::Round($latestBackup.Size/1MB, 2)) MB" "INFO"
+
+                    # Extract filename from S3 key
+                    $fileName = [System.IO.Path]::GetFileName($latestBackup.Key)
+                    $localFilePath = Join-Path -Path $RemoteDirectory -ChildPath $fileName
+
+                    # Check if file already exists and compare sizes
+                    if (Test-Path $localFilePath) {
+                        $existingFile = Get-Item $localFilePath
+                        if ($existingFile.Length -eq $latestBackup.Size) {
+                            Write-Log "File already exists with same size. Skipping download." "WARN"
+                            return $localFilePath
+                        } else {
+                            Write-Log "File exists but sizes differ. Re-downloading..." "WARN"
+                            Remove-Item $localFilePath -Force
+                        }
+                    }
+
+                    # Download the file
+                    Write-Log "Downloading file from S3..." "INFO"
+                    
+                    $downloadCommand = "aws s3 cp s3://$S3BucketName/$($latestBackup.Key) $localFilePath"
+                    Write-Log "Executing: $downloadCommand" "DEBUG"
+                    
+                    $downloadResult = Invoke-Expression $downloadCommand 2>&1
+                    if ($LASTEXITCODE -ne 0) {
+                        throw "S3 download failed. Error: $downloadResult"
+                    }
+
+                    # Verify download
+                    if (-not (Test-Path $localFilePath)) {
+                        throw "Download completed but file not found at expected location: $localFilePath"
+                    }
+
+                    $downloadedFile = Get-Item $localFilePath
+                    if ($downloadedFile.Length -ne $latestBackup.Size) {
+                        throw "Download size mismatch. Expected: $($latestBackup.Size) bytes, Actual: $($downloadedFile.Length) bytes"
+                    }
+
+                    Write-Log "Download completed successfully!" "INFO"
+                    Write-Log "File size: $([math]::Round($downloadedFile.Length/1MB, 2)) MB" "INFO"
+                    Write-Log "Location: $localFilePath" "INFO"
+
+                    # Return the downloaded file path
+                    $localFilePath
+
+                } catch {
+                    $errorMsg = $_.Exception.Message
+                    Write-Log "Error in remote execution: $errorMsg" "ERROR"
+                    Write-Log "Error details: $($_.ScriptStackTrace)" "DEBUG"
+                    throw
+                }
+            } -ArgumentList $S3BucketName, $S3Prefix, $DBName, $RemoteDirectory
+            
+            $connected = $true
+            Write-Host "[SUCCESS] WinRM connection established on attempt $retryCount" -ForegroundColor Green
+            
+        } catch [System.Management.Automation.Remoting.PSRemotingTransportException] {
+            Write-Host "[WARN] WinRM connection failed on attempt $retryCount $($_.Exception.Message)" -ForegroundColor Yellow
+            
+            if ($retryCount -lt $maxRetries) {
+                Write-Host "[INFO] Waiting $retryDelay seconds before next attempt..." -ForegroundColor Gray
+                Start-Sleep -Seconds $retryDelay
+            } else {
+                Write-Host "[ERROR] Maximum connection attempts ($maxRetries) reached. Giving up." -ForegroundColor Red
+                throw
+            }
+        }
+    } while (-not $connected -and $retryCount -le $maxRetries)
+
+    if (-not $connected) {
+        throw "Failed to establish WinRM connection after $maxRetries attempts"
+    }
+    #######
+
+    if ($result) {
+        Write-Host "[SUCCESS] Remote operation completed successfully!" -ForegroundColor Green
+        Write-Host "[SUCCESS] Downloaded file: $result" -ForegroundColor Green
+        return $result
+    } else {
+        Write-Host "[ERROR] Remote operation completed but no file was returned" -ForegroundColor Red
+        exit 1
+    }
+
+}
+catch [System.Management.Automation.RemoteException] {
+    Write-Host "[REMOTE ERROR] $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+catch [System.Management.Automation.RuntimeException] {
+    Write-Host "[RUNTIME ERROR] $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+catch {
+    Write-Host "[UNEXPECTED ERROR] $($_.Exception.GetType().Name): $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "Stack Trace: $($_.ScriptStackTrace)" -ForegroundColor DarkRed
+    exit 1
+}
+
+
+scripts\download-transfer-db.ps1
+================================
+#Requires -Version 5.1
+
+param(
+    [Parameter(Mandatory=$true)]
+    [string]$source_role_arn,
+    
+    [Parameter(Mandatory=$true)]
+    [string]$source_bucket,
+    
+    [Parameter(Mandatory=$true)]
+    [string]$source_prefix,
+    
+    [Parameter(Mandatory=$true)]
+    [string]$dest_role_arn,
+    
+    [Parameter(Mandatory=$true)]
+    [string]$dest_bucket,
+    
+    [Parameter(Mandatory=$true)]
+    [string]$dest_prefix,
+    
+    [string]$remote_server,
+    [string]$username,
+    [string]$password,
+    [string]$remote_local_dir = "C:\YOUR_REMOTE-DIR\",
+    [string]$local_dir = "C:\YOUR_REMOTE-DIR\",
+    [string]$region = "us-east-1",
+    [switch]$no_cleanup
+)
+
+# Configure logging
+$logFile = Join-Path $PSScriptRoot "s3-cross-account-copy.log"
+$ErrorActionPreference = "Stop"
+
+function Write-Log {
+    param([string]$Message, [string]$Level = "INFO")
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logMessage = "$timestamp - $Level - $Message"
+    Write-Host $logMessage
+    Add-Content -Path $logFile -Value $logMessage
+}
+
+function Invoke-AWSCommand {
+    param(
+        [string]$Command,
+        [hashtable]$EnvVars = @{}
+    )
+    
+    $originalEnvVars = @{}
+    foreach ($key in $EnvVars.Keys) {
+        $originalEnvVars[$key] = [Environment]::GetEnvironmentVariable($key)
+        [Environment]::SetEnvironmentVariable($key, $EnvVars[$key])
+    }
+    
+    try {
+        $output = Invoke-Expression $Command 2>&1
+        $exitCode = $LASTEXITCODE
+        
+        if ($exitCode -ne 0) {
+            throw "Command failed with exit code $exitCode. Output: $output"
+        }
+        
+        return $output
+    }
+    finally {
+        foreach ($key in $originalEnvVars.Keys) {
+            [Environment]::SetEnvironmentVariable($key, $originalEnvVars[$key])
+        }
+    }
+}
+
+function Assume-Role {
+    param([string]$RoleArn, [string]$SessionName = "S3Session")
+    
+    try {
+        Write-Log "Assuming IAM role: $RoleArn"
+        
+        $assumeRoleCmd = "aws sts assume-role --role-arn `"$RoleArn`" --role-session-name `"$SessionName`""
+        $result = Invoke-AWSCommand -Command $assumeRoleCmd
+        
+        $assumedRole = $result | ConvertFrom-Json
+        $credentials = @{
+            AccessKeyId = $assumedRole.Credentials.AccessKeyId
+            SecretAccessKey = $assumedRole.Credentials.SecretAccessKey
+            SessionToken = $assumedRole.Credentials.SessionToken
+            Expiration = $assumedRole.Credentials.Expiration
+        }
+        
+        Write-Log "Successfully assumed IAM role"
+        return $credentials
+    }
+    catch {
+        Write-Log "Failed to assume role $RoleArn : $($_.Exception.Message)" -Level "ERROR"
+        throw
+    }
+}
+
+function Download-LastModifiedObject {
+    param(
+        [string]$RoleArn,
+        [string]$BucketName,
+        [string]$Prefix,
+        [string]$LocalDir
+    )
+    
+    try {
+        Write-Log "Starting process to download last modified object from s3://$BucketName/$Prefix"
+        
+        # Validate inputs
+        if ([string]::IsNullOrEmpty($RoleArn) -or [string]::IsNullOrEmpty($BucketName) -or 
+            [string]::IsNullOrEmpty($Prefix) -or [string]::IsNullOrEmpty($LocalDir)) {
+            throw "Missing required parameters: role_arn, bucket_name, prefix, and local_dir are all required"
+        }
+        
+        if (-not $RoleArn.StartsWith('arn:aws:iam::')) {
+            throw "Invalid role ARN format: $RoleArn"
+        }
+        
+        # Create local directory if it doesn't exist
+        Write-Log "Ensuring local directory exists: $LocalDir"
+        if (-not (Test-Path $LocalDir)) {
+            New-Item -ItemType Directory -Path $LocalDir -Force | Out-Null
+        }
+        
+        if (-not (Test-Path $LocalDir -PathType Container)) {
+            throw "Failed to create or access directory: $LocalDir"
+        }
+        
+        # Assume the IAM role
+        $credentials = Assume-Role -RoleArn $RoleArn -SessionName "S3DownloadSession"
+        
+        # List objects and find the latest one using AWS CLI
+        Write-Log "Listing objects in s3://$BucketName/$Prefix"
+        
+        $envVars = @{
+            AWS_ACCESS_KEY_ID = $credentials.AccessKeyId
+            AWS_SECRET_ACCESS_KEY = $credentials.SecretAccessKey
+            AWS_SESSION_TOKEN = $credentials.SessionToken
+        }
+        
+        $listCmd = "aws s3api list-objects-v2 --bucket `"$BucketName`" --prefix `"$Prefix`" --query 'sort_by(Contents, &LastModified)[-1]'"
+        $latestObjectJson = Invoke-AWSCommand -Command $listCmd -EnvVars $envVars
+        
+        if ([string]::IsNullOrEmpty($latestObjectJson) -or $latestObjectJson -eq "null") {
+            throw "No objects found in prefix: s3://$BucketName/$Prefix"
+        }
+        
+        $latestObject = $latestObjectJson | ConvertFrom-Json
+        
+        Write-Log "Latest object: $($latestObject.Key)"
+        Write-Log "Last modified: $($latestObject.LastModified), Size: $($latestObject.Size) bytes"
+        
+        $objectKey = $latestObject.Key
+        $objectName = [System.IO.Path]::GetFileName($objectKey)
+        $localPath = Join-Path $LocalDir $objectName
+        
+        # Check if file already exists
+        if (Test-Path $localPath) {
+            Write-Log "File already exists at $localPath, it will be overwritten" -Level "WARNING"
+        }
+        
+        # Download the object using AWS CLI
+        Write-Log "Downloading $objectKey to $localPath..."
+        $downloadCmd = "aws s3 cp `"s3://$BucketName/$objectKey`" `"$localPath`""
+        Invoke-AWSCommand -Command $downloadCmd -EnvVars $envVars
+        
+        # Verify download
+        if (Test-Path $localPath) {
+            $fileSize = (Get-Item $localPath).Length
+            Write-Log "Successfully downloaded: $localPath (Size: $fileSize bytes)"
+            return $localPath, $objectName
+        }
+        else {
+            throw "Download failed: File not found at $localPath"
+        }
+    }
+    catch {
+        Write-Log "Download error: $($_.Exception.Message)" -Level "ERROR"
+        throw
+    }
+}
+
+function Upload-ToDestinationS3 {
+    param(
+        [string]$RoleArn,
+        [string]$BucketName,
+        [string]$Prefix,
+        [string]$LocalFilePath
+    )
+    
+    try {
+        $credentials = Assume-Role -RoleArn $RoleArn -SessionName "S3UploadSession"
+        
+        # Extract filename and construct destination key
+        $filename = [System.IO.Path]::GetFileName($LocalFilePath)
+        $destinationKey = if ($Prefix.TrimEnd('/')) { "$($Prefix.TrimEnd('/'))/$filename" } else { $filename }
+        
+        # Upload the file using AWS CLI
+        Write-Log "Uploading $LocalFilePath to s3://$BucketName/$destinationKey"
+        
+        $envVars = @{
+            AWS_ACCESS_KEY_ID = $credentials.AccessKeyId
+            AWS_SECRET_ACCESS_KEY = $credentials.SecretAccessKey
+            AWS_SESSION_TOKEN = $credentials.SessionToken
+        }
+        
+        $uploadCmd = "aws s3 cp `"$LocalFilePath`" `"s3://$BucketName/$destinationKey`""
+        Invoke-AWSCommand -Command $uploadCmd -EnvVars $envVars
+        
+        Write-Log "Successfully uploaded to s3://$BucketName/$destinationKey"
+        return $destinationKey
+    }
+    catch {
+        Write-Log "AWS API error during upload: $($_.Exception.Message)" -Level "ERROR"
+        throw
+    }
+}
+
+function Check-AwsCliOnRemote {
+    param(
+        [string]$ServerIp,
+        [string]$Username,
+        [string]$Password
+    )
+    
+    try {
+        Write-Log "Checking AWS CLI on remote server: $ServerIp"
+        
+        $session = New-PSSession -ComputerName $ServerIp -Credential (New-Object System.Management.Automation.PSCredential($Username, (ConvertTo-SecureString $Password -AsPlainText -Force)))
+        
+        $result = Invoke-Command -Session $session -ScriptBlock {
+            try {
+                # Check AWS CLI version
+                $version = aws --version 2>&1
+                if ($LASTEXITCODE -eq 0) {
+                    return @{ Success = $true; Version = $version; Message = "AWS CLI found" }
+                }
+                
+                # Check if AWS CLI is in PATH
+                $whereResult = where aws 2>&1
+                if ($LASTEXITCODE -eq 0 -and $whereResult -like "*aws.exe*") {
+                    return @{ Success = $true; Version = "Found at: $whereResult"; Message = "AWS CLI found in PATH" }
+                }
+                
+                # Check common installation locations
+                $commonPaths = @(
+                    "C:\Program Files\Amazon\AWSCLI\aws.exe",
+                    "C:\Program Files\Amazon\AWSCLIV2\aws.exe",
+                    "C:\Program Files (x86)\Amazon\AWSCLI\aws.exe"
+                )
+                
+                foreach ($path in $commonPaths) {
+                    if (Test-Path $path) {
+                        return @{ Success = $true; Version = "Found at: $path"; Message = "AWS CLI found" }
+                    }
+                }
+                
+                return @{ Success = $false; Message = "AWS CLI not found" }
+            }
+            catch {
+                return @{ Success = $false; Message = $_.Exception.Message }
+            }
+        }
+        
+        Remove-PSSession $session
+        
+        if ($result.Success) {
+            Write-Log "AWS CLI found on remote server: $($result.Version)"
+            return $true
+        }
+        else {
+            Write-Log "AWS CLI not found on remote server: $($result.Message)" -Level "ERROR"
+            return $false
+        }
+    }
+    catch {
+        Write-Log "Could not check AWS CLI on remote server: $($_.Exception.Message)" -Level "WARNING"
+        return $false
+    }
+}
+
+function Execute-RemoteDownload {
+    param(
+        [string]$ServerIp,
+        [string]$Username,
+        [string]$Password,
+        [string]$DestRoleArn,
+        [string]$DestBucket,
+        [string]$DestPrefix,
+        [string]$RemoteLocalDir,
+        [string]$Filename
+    )
+    
+    try {
+        Write-Log "Connecting to remote server: $ServerIp"
+        
+        # Assume role to get temporary credentials
+        $credentials = Assume-Role -RoleArn $DestRoleArn -SessionName "RemoteCLISession"
+        
+        $cleanRemoteDir = $RemoteLocalDir.TrimEnd('\')
+        $s3SourcePath = "s3://$DestBucket/$($DestPrefix.TrimEnd('/'))/$Filename"
+        $localDestPath = "$cleanRemoteDir\$Filename"
+        
+        Write-Log "Remote Local Directory: $RemoteLocalDir"
+        Write-Log "Clean Remote Directory: $cleanRemoteDir"
+        Write-Log "S3 Source Path: $s3SourcePath"
+        Write-Log "Local Destination Path: $localDestPath"
+        
+        # Create PowerShell session
+        $session = New-PSSession -ComputerName $ServerIp -Credential (New-Object System.Management.Automation.PSCredential($Username, (ConvertTo-SecureString $Password -AsPlainText -Force)))
+        
+        $result = Invoke-Command -Session $session -ScriptBlock {
+            param($AccessKey, $SecretKey, $SessionToken, $S3SourcePath, $LocalDestPath, $CleanRemoteDir)
+            
+            try {
+                # Set environment variables
+                $env:AWS_ACCESS_KEY_ID = $AccessKey
+                $env:AWS_SECRET_ACCESS_KEY = $SecretKey
+                $env:AWS_SESSION_TOKEN = $SessionToken
+                $env:AWS_DEFAULT_REGION = "us-east-1"
+                
+                Write-Output "=== AWS CLI DOWNLOAD SCRIPT ==="
+                Write-Output "Date: $(Get-Date)"
+                Write-Output "Remote Directory: $CleanRemoteDir"
+                Write-Output "Filename: $(Split-Path $LocalDestPath -Leaf)"
+                Write-Output "S3 Source: $S3SourcePath"
+                Write-Output ""
+                
+                Write-Output "Checking AWS CLI version..."
+                aws --version
+                Write-Output ""
+                
+                Write-Output "Creating directory if it doesn't exist..."
+                if (-not (Test-Path $CleanRemoteDir)) {
+                    New-Item -ItemType Directory -Path $CleanRemoteDir -Force | Out-Null
+                }
+                Write-Output ""
+                
+                Write-Output "Testing AWS credentials..."
+                aws sts get-caller-identity
+                Write-Output ""
+                
+                Write-Output "Downloading file from S3..."
+                aws s3 cp "$S3SourcePath" "$LocalDestPath" --cli-connect-timeout 300 --cli-read-timeout 600
+                
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Output "SUCCESS: AWS CLI reported download success"
+                    Write-Output "Checking if file actually exists..."
+                    
+                    if (Test-Path $LocalDestPath) {
+                        Write-Output "File verification: OK - File exists at destination"
+                        Write-Output ""
+                        
+                        Write-Output "Deleting file from S3 bucket..."
+                        aws s3 rm "$S3SourcePath"
+                        
+                        if ($LASTEXITCODE -eq 0) {
+                            Write-Output "SUCCESS: File deleted from S3 bucket"
+                            return @{ Success = $true; Message = "Download and deletion successful" }
+                        }
+                        else {
+                            Write-Output "WARNING: File downloaded but could not be deleted from S3"
+                            return @{ Success = $true; Message = "Download successful but deletion failed" }
+                        }
+                    }
+                    else {
+                        Write-Output "ERROR: AWS CLI reported success but file not found at $LocalDestPath"
+                        return @{ Success = $false; Message = "File not found after download" }
+                    }
+                }
+                else {
+                    Write-Output "ERROR: AWS CLI download failed with error code $LASTEXITCODE"
+                    return @{ Success = $false; Message = "AWS CLI download failed" }
+                }
+            }
+            catch {
+                return @{ Success = $false; Message = $_.Exception.Message }
+            }
+        } -ArgumentList $credentials.AccessKeyId, $credentials.SecretAccessKey, $credentials.SessionToken, $s3SourcePath, $localDestPath, $cleanRemoteDir
+        
+        Remove-PSSession $session
+        
+        # Final verification
+        $verifySession = New-PSSession -ComputerName $ServerIp -Credential (New-Object System.Management.Automation.PSCredential($Username, (ConvertTo-SecureString $Password -AsPlainText -Force)))
+        $verifyResult = Invoke-Command -Session $verifySession -ScriptBlock {
+            param($LocalDestPath)
+            Test-Path $LocalDestPath
+        } -ArgumentList $localDestPath
+        Remove-PSSession $verifySession
+        
+        if ($verifyResult) {
+            Write-Log "Remote download completed successfully!"
+            Write-Log "File verified: $localDestPath"
+            return $true
+        }
+        else {
+            throw "Final verification failed. File not found at $localDestPath"
+        }
+    }
+    catch {
+        Write-Log "Remote execution error: $($_.Exception.Message)" -Level "ERROR"
+        throw
+    }
+}
+
+function Copy-S3ObjectAcrossAccounts {
+    param(
+        [string]$SourceRoleArn,
+        [string]$SourceBucket,
+        [string]$SourcePrefix,
+        [string]$DestRoleArn,
+        [string]$DestBucket,
+        [string]$DestPrefix,
+        [string]$LocalDir,
+        [string]$RemoteServer,
+        [string]$Username,
+        [string]$Password,
+        [string]$RemoteLocalDir,
+        [bool]$Cleanup
+    )
+    
+    $localFilePath = $null
+    try {
+        # Step 1: Download from source bucket to local machine
+        Write-Log "Step 1: Downloading from source bucket..."
+        $localFilePath, $filename = Download-LastModifiedObject -RoleArn $SourceRoleArn -BucketName $SourceBucket -Prefix $SourcePrefix -LocalDir $LocalDir
+        
+        # Step 2: Upload to destination bucket from local machine
+        Write-Log "Step 2: Uploading to destination bucket..."
+        $destinationKey = Upload-ToDestinationS3 -RoleArn $DestRoleArn -BucketName $DestBucket -Prefix $DestPrefix -LocalFilePath $localFilePath
+        
+        # Step 3: If remote server specified, download from destination bucket to remote server
+        $remoteSuccess = $null
+        if ($RemoteServer -and $Username -and $Password -and $RemoteLocalDir) {
+            Write-Log "Step 3: Initiating remote download..."
+            $awsCliAvailable = Check-AwsCliOnRemote -ServerIp $RemoteServer -Username $Username -Password $Password
+            
+            if ($awsCliAvailable) {
+                Write-Log "AWS CLI available on remote server, proceeding with remote download..."
+                $remoteSuccess = Execute-RemoteDownload -ServerIp $RemoteServer -Username $Username -Password $Password `
+                    -DestRoleArn $DestRoleArn -DestBucket $DestBucket -DestPrefix $DestPrefix `
+                    -RemoteLocalDir $RemoteLocalDir -Filename $filename
+            }
+            else {
+                throw "AWS CLI not found on remote server. Please install AWS CLI on the remote machine."
+            }
+        }
+        
+        # Step 4: Cleanup if requested
+        if ($Cleanup -and $localFilePath -and (Test-Path $localFilePath)) {
+            Write-Log "Cleaning up local file: $localFilePath"
+            Remove-Item $localFilePath -Force
+        }
+        
+        return @{
+            Success = $true
+            SourceFile = $localFilePath
+            DestinationBucket = $DestBucket
+            DestinationKey = $destinationKey
+            LocalFileCleaned = $Cleanup
+            RemoteDownloadSuccess = $remoteSuccess
+            Filename = $filename
+        }
+    }
+    catch {
+        Write-Log "Cross-account copy failed: $($_.Exception.Message)" -Level "ERROR"
+        
+        # Don't cleanup on error for debugging
+        if ($localFilePath -and (Test-Path $localFilePath)) {
+            Write-Log "Local file retained for debugging: $localFilePath"
+        }
+        
+        return @{
+            Success = $false
+            Error = $_.Exception.Message
+            SourceFile = $localFilePath
+            RemoteDownloadSuccess = $false
+        }
+    }
+}
+
+# Main execution
+try {
+    Write-Log "=" * 80
+    Write-Log "Starting S3 Cross-Account Copy Process with Remote Download (AWS CLI)"
+    Write-Log "=" * 80
+    
+    # Source info
+    Write-Log "SOURCE:"
+    Write-Log "  Role ARN: $source_role_arn"
+    Write-Log "  Bucket: $source_bucket"
+    Write-Log "  Prefix: $source_prefix"
+    
+    # Destination info
+    Write-Log "DESTINATION:"
+    Write-Log "  Role ARN: $dest_role_arn"
+    Write-Log "  Bucket: $dest_bucket"
+    Write-Log "  Prefix: $dest_prefix"
+    
+    # Remote info if provided
+    if ($remote_server) {
+        Write-Log "REMOTE SERVER DOWNLOAD:"
+        Write-Log "  Server: $remote_server"
+        Write-Log "  Username: $username"
+        Write-Log "  Remote Directory: $remote_local_dir"
+        Write-Log "  Method: AWS CLI with environment variables"
+    }
+    
+    # Common info
+    Write-Log "LOCAL TEMP DIR: $local_dir"
+    Write-Log "REGION: $region"
+    Write-Log "CLEANUP: $(-not $no_cleanup)"
+    Write-Log "=" * 80
+    
+    # Set AWS region if provided
+    if ($region) {
+        $env:AWS_DEFAULT_REGION = $region.Trim()
+    }
+    
+    # Execute the complete process
+    $result = Copy-S3ObjectAcrossAccounts -SourceRoleArn $source_role_arn -SourceBucket $source_bucket -SourcePrefix $source_prefix `
+        -DestRoleArn $dest_role_arn -DestBucket $dest_bucket -DestPrefix $dest_prefix `
+        -LocalDir $local_dir -RemoteServer $remote_server -Username $username `
+        -Password $password -RemoteLocalDir $remote_local_dir -Cleanup (-not $no_cleanup)
+    
+    Write-Log "=" * 80
+    if ($result.Success) {
+        Write-Log "Complete process finished successfully!"
+        Write-Log "File: $($result.Filename)"
+        Write-Log "Destination: s3://$($result.DestinationBucket)/$($result.DestinationKey)"
+        
+        if ($remote_server) {
+            if ($result.RemoteDownloadSuccess) {
+                Write-Log "Remote download successful to: $remote_local_dir"
+            }
+            else {
+                Write-Log "Remote download was not attempted or failed" -Level "WARNING"
+            }
+        }
+        
+        if ($result.LocalFileCleaned) {
+            Write-Log "Local temporary file cleaned up"
+        }
+    }
+    else {
+        Write-Log "Process failed: $($result.Error)" -Level "ERROR"
+    }
+    Write-Log "=" * 80
+    
+    return $result
+}
+catch {
+    Write-Log "Process failed: $($_.Exception.Message)" -Level "ERROR"
+    return @{ Success = $false; Error = $_.Exception.Message }
+}
+
+# Final output
+if ($result -and $result.Success) {
+    Write-Host "`nSuccess! Complete process finished successfully!" -ForegroundColor Green
+    Write-Host "File: $($result.Filename)" -ForegroundColor Green
+    Write-Host "Destination: s3://$($result.DestinationBucket)/$($result.DestinationKey)" -ForegroundColor Green
+    if ($result.RemoteDownloadSuccess) {
+        Write-Host "Remote download completed" -ForegroundColor Green
+    }
+    exit 0
+}
+else {
+    $errorMsg = if ($result) { $result.Error } else { "Process failed" }
+    Write-Host "`nProcess failed: $errorMsg" -ForegroundColor Red
+    exit 1
+}
+
+
+scripts\download-transfer-db.py
+===============================
+import boto3
+import os
+import logging
+import argparse
+import tempfile
+import winrm
+import json
+from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
+import time
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+def assume_role(role_arn, session_name="S3Session"):
+    """
+    Assume an IAM role and return credentials
+    """
+    try:
+        logger.info(f"Assuming IAM role: {role_arn}")
+        sts_client = boto3.client('sts')
+        assumed_role = sts_client.assume_role(
+            RoleArn=role_arn,
+            RoleSessionName=session_name
+        )
+        credentials = assumed_role['Credentials']
+        logger.info("Successfully assumed IAM role")
+        return credentials
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        error_msg = e.response['Error']['Message']
+        logger.error(f"Failed to assume role {role_arn}: {error_code} - {error_msg}")
+        raise Exception(f"Failed to assume role: {error_code} - {error_msg}")
+
+def create_s3_client(credentials):
+    """
+    Create S3 client with given credentials
+    """
+    return boto3.client(
+        's3',
+        aws_access_key_id=credentials['AccessKeyId'],
+        aws_secret_access_key=credentials['SecretAccessKey'],
+        aws_session_token=credentials['SessionToken']
+    )
+
+def download_last_modified_object(role_arn, bucket_name, prefix, local_dir):
+    """
+    Find and download the last modified object from S3 prefix
+    """
+    s3_client = None
+    try:
+        logger.info(f"Starting process to download last modified object from s3://{bucket_name}/{prefix}")
+        
+        # Validate inputs
+        if not all([role_arn, bucket_name, prefix, local_dir]):
+            raise ValueError("Missing required parameters: role_arn, bucket_name, prefix, and local_dir are all required")
+        
+        if not role_arn.startswith('arn:aws:iam::'):
+            raise ValueError(f"Invalid role ARN format: {role_arn}")
+        
+        # Create local directory if it doesn't exist
+        logger.info(f"Ensuring local directory exists: {local_dir}")
+        os.makedirs(local_dir, exist_ok=True)
+        
+        if not os.path.isdir(local_dir):
+            raise OSError(f"Failed to create or access directory: {local_dir}")
+        
+        # Assume the IAM role and create S3 client
+        credentials = assume_role(role_arn, "S3DownloadSession")
+        s3_client = create_s3_client(credentials)
+        
+        # List objects in the prefix with pagination
+        logger.info(f"Listing objects in s3://{bucket_name}/{prefix}")
+        paginator = s3_client.get_paginator('list_objects_v2')
+        page_iterator = paginator.paginate(Bucket=bucket_name, Prefix=prefix)
+        
+        latest_object = None
+        object_count = 0
+        
+        for page_num, page in enumerate(page_iterator, 1):
+            if 'Contents' in page:
+                object_count += len(page['Contents'])
+                for obj in page['Contents']:
+                    if latest_object is None or obj['LastModified'] > latest_object['LastModified']:
+                        latest_object = obj
+                logger.info(f"Processed page {page_num}, found {len(page['Contents'])} objects")
+        
+        if latest_object is None:
+            raise Exception(f"No objects found in prefix: s3://{bucket_name}/{prefix}")
+        
+        logger.info(f"Found {object_count} total objects. Latest object: {latest_object['Key']}")
+        logger.info(f"Last modified: {latest_object['LastModified']}, Size: {latest_object['Size']} bytes")
+        
+        object_key = latest_object['Key']
+        object_name = os.path.basename(object_key)
+        local_path = os.path.join(local_dir, object_name)
+        
+        # Check if file already exists
+        if os.path.exists(local_path):
+            logger.warning(f"File already exists at {local_path}, it will be overwritten")
+        
+        # Download the object
+        logger.info(f"Downloading {object_key} to {local_path}...")
+        s3_client.download_file(bucket_name, object_key, local_path)
+        
+        # Verify download
+        if os.path.exists(local_path):
+            file_size = os.path.getsize(local_path)
+            logger.info(f"Successfully downloaded: {local_path} (Size: {file_size} bytes)")
+            return local_path, object_name
+        else:
+            raise Exception(f"Download failed: File not found at {local_path}")
+            
+    except Exception as e:
+        logger.error(f"Download error: {str(e)}")
+        raise
+
+def upload_to_destination_s3(role_arn, bucket_name, prefix, local_file_path):
+    """
+    Upload a file to destination S3 bucket
+    """
+    s3_client = None
+    try:
+        credentials = assume_role(role_arn, "S3UploadSession")
+        s3_client = create_s3_client(credentials)
+        
+        # Extract filename and construct destination key
+        filename = os.path.basename(local_file_path)
+        destination_key = f"{prefix.rstrip('/')}/{filename}" if prefix else filename
+        
+        # Upload the file
+        logger.info(f"Uploading {local_file_path} to s3://{bucket_name}/{destination_key}")
+        s3_client.upload_file(local_file_path, bucket_name, destination_key)
+        
+        logger.info(f"Successfully uploaded to s3://{bucket_name}/{destination_key}")
+        return destination_key
+            
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        error_msg = e.response['Error']['Message']
+        logger.error(f"AWS API error during upload ({error_code}): {error_msg}")
+        raise Exception(f"Upload failed: {error_code} - {error_msg}")
+
+def copy_s3_object_across_accounts(source_role_arn, source_bucket, source_prefix,
+                                  dest_role_arn, dest_bucket, dest_prefix,
+                                  local_dir, cleanup=True):
+    """
+    Complete workflow: download from source, upload to destination, and remote download
+    """
+    
+    local_file_path = None
+    try:
+        # Step 1: Download from source bucket to local machine
+        local_file_path, filename = download_last_modified_object(
+            role_arn=source_role_arn,
+            bucket_name=source_bucket,
+            prefix=source_prefix,
+            local_dir=local_dir
+        )
+        
+        # Step 2: Upload to destination bucket from local machine
+        destination_key = upload_to_destination_s3(
+            role_arn=dest_role_arn,
+            bucket_name=dest_bucket,
+            prefix=dest_prefix,
+            local_file_path=local_file_path
+        )
+        
+        
+        # Step 4: Cleanup if requested
+        if cleanup and local_file_path and os.path.exists(local_file_path):
+            logger.info(f"Cleaning up local file: {local_file_path}")
+            os.remove(local_file_path)
+        
+        return {
+            'success': True,
+            'source_file': local_file_path,
+            'destination_bucket': dest_bucket,
+            'destination_key': destination_key,
+            'local_file_cleaned': cleanup,
+            'filename': filename
+        }
+        
+    except Exception as e:
+        logger.error(f"Cross-account copy failed: {str(e)}")
+        
+        # Don't cleanup on error for debugging
+        if local_file_path and os.path.exists(local_file_path):
+            logger.info(f"Local file retained for debugging: {local_file_path}")
+        
+        return {
+            'success': False,
+            'error': str(e),
+            'source_file': local_file_path,
+            'remote_download_success': False
+        }
+
+def main():
+    """Main function with command line arguments"""
+    parser = argparse.ArgumentParser(description='Copy the last modified object between S3 buckets across accounts with remote download using AWS CLI')
+    
+    # Source arguments
+    parser.add_argument('--source-role-arn', required=True, help='Source AWS IAM Role ARN to assume')
+    parser.add_argument('--source-bucket', required=True, help='Source S3 bucket name')
+    parser.add_argument('--source-prefix', required=True, help='Source S3 prefix/path')
+    
+    # Destination arguments
+    parser.add_argument('--dest-role-arn', required=True, help='Destination AWS IAM Role ARN to assume')
+    parser.add_argument('--dest-bucket', required=True, help='Destination S3 bucket name')
+    parser.add_argument('--dest-prefix', required=True, help='Destination S3 prefix/path')
+    
+    # Common arguments
+    parser.add_argument('--local-dir', default='C:\\YOUR_REMOTE-DIR\\', help='Local directory for temporary storage')
+    parser.add_argument('--region', default='us-east-1', help='AWS region')
+    parser.add_argument('--no-cleanup', action='store_true', help='Keep local file after upload')
+    
+    args = parser.parse_args()
+    
+    try:
+        logger.info("=" * 80)
+        logger.info("Starting S3 Cross-Account Copy Process with Remote Download (AWS CLI)")
+        logger.info("=" * 80)
+        
+        # Source info
+        logger.info(f"SOURCE:-")
+        logger.info(f"  Role ARN: {args.source_role_arn}")
+        logger.info(f"  Bucket: {args.source_bucket}")
+        logger.info(f"  Prefix: {args.source_prefix}")
+        
+        # Destination info
+        logger.info(f"DESTINATION:-")
+        logger.info(f"  Role ARN: {args.dest_role_arn}")
+        logger.info(f"  Bucket: {args.dest_bucket}")
+        logger.info(f"  Prefix: {args.dest_prefix}")
+        
+        # Common info
+        logger.info(f"LOCAL TEMP DIR: {args.local_dir}")
+        logger.info(f"REGION: {args.region}")
+        logger.info(f"CLEANUP: {not args.no_cleanup}")
+        logger.info("=" * 80)
+        
+        # Set AWS region if provided
+        if args.region:
+            os.environ['AWS_DEFAULT_REGION'] = args.region.strip()  # Strip any extra spaces
+        
+        # Execute the complete process
+        result = copy_s3_object_across_accounts(
+            source_role_arn=args.source_role_arn,
+            source_bucket=args.source_bucket,
+            source_prefix=args.source_prefix,
+            dest_role_arn=args.dest_role_arn,
+            dest_bucket=args.dest_bucket,
+            dest_prefix=args.dest_prefix,
+            local_dir=args.local_dir,
+            cleanup=not args.no_cleanup
+        )
+        
+        logger.info("=" * 80)
+        if result['success']:
+            logger.info("Complete process finished successfully!")
+            logger.info(f"File: {result.get('filename')}")
+            logger.info(f"Destination: s3://{result['destination_bucket']}/{result['destination_key']}")
+            if result.get('local_file_cleaned'):
+                logger.info("Local temporary file cleaned up")
+        else:
+            logger.error(f"Process failed: {result['error']}")
+        logger.info("=" * 80)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Process failed: {str(e)}", exc_info=True)
+        return {'success': False, 'error': str(e)}
+
+if __name__ == "__main__":
+    result = main()
+    if result and result.get('success'):
+        print(f"\nSuccess! Complete process finished successfully!")
+        print(f"File: {result.get('filename')}")
+        print(f"Destination: s3://{result['destination_bucket']}/{result['destination_key']}")
+    else:
+        error_msg = result.get('error', 'Unknown error') if result else 'Process failed'
+        print(f"\nProcess failed: {error_msg}")
+        exit(1)
+
+
+
+scripts\execute-query-prod.ps1
+==============================
+param(
+    [Parameter(Mandatory=$true)]
+    [string]$RemoteServerIP,
+    
+    [Parameter(Mandatory=$true)]
+    [string]$Username,
+    
+    [Parameter(Mandatory=$true)]
+    [securestring]$Password,  # Changed from string to securestring
+    
+    [Parameter(Mandatory=$false)]
+    [string]$RemoteFolderPath,
+    
+    [Parameter(Mandatory=$false)]
+    [string]$SQLFilePath,
+    
+    [Parameter(Mandatory=$false)]
+    [string]$DatabaseName
+)
+
+# Create credential object directly from secure string password
+$Credential = New-Object System.Management.Automation.PSCredential ($Username, $Password)
+
+# Function for logging
+function Write-Log {
+    param(
+        [string]$Message,
+        [string]$Level = "INFO",
+        [string]$Color = "White"
+    )
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logMessage = "[$timestamp] [$Level] $Message"
+    Write-Host $logMessage -ForegroundColor $Color
+}
+
+# Function to display query results in a formatted table
+function Get-QueryResultsAsString {
+    param($Results)
+    
+    $output = ""
+    
+    if ($Results -and $Results.Count -gt 0) {
+        # Convert results to formatted table string
+        $tableString = $Results | Format-Table -AutoSize | Out-String -Width 4096
+        $tableLines = $tableString.Trim() -split "`r?`n"
+        
+        # Find the longest line for border width
+        $maxWidth = 0
+        foreach ($line in $tableLines) {
+            if ($line.Length -gt $maxWidth) {
+                $maxWidth = $line.Length
+            }
+        }
+        
+        # Add padding for borders
+        $borderWidth = $maxWidth + 4
+        
+        # Create title for top border
+        $title = " Restore Test "
+        $titleLine = "*" * 12 + $title + "*" * (($borderWidth - 12 - $title.Length) + 1)
+        
+        # Create bottom border
+        $bottomBorder = "*" * $borderWidth
+        
+        # Build the output string
+        $output += $titleLine + "`r`n"
+        
+        foreach ($line in $tableLines) {
+            $paddedLine = " * " + $line.PadRight($maxWidth) + " * "
+            $output += $paddedLine + "`r`n"
+        }
+        
+        $output += $bottomBorder + "`r`n"
+        
+    } else {
+        # For empty results
+        $message = "Query executed successfully (no rows returned)"
+        $borderWidth = $message.Length + 4
+        
+        $title = " Restore Test "
+        $titleLine = "*" * 12 + $title + "*" * (($borderWidth - 12 - $title.Length) + 1)
+        $bottomBorder = "*" * $borderWidth
+        
+        $output += $titleLine + "`r`n"
+        $output += " * " + $message.PadRight($message.Length) + " * " + "`r`n"
+        $output += $bottomBorder + "`r`n"
+    }
+    
+    return $output
+}
+
+try {
+    Write-Log "Starting SQL script execution process" "INFO" "Cyan"
+    Write-Log "Target server: $RemoteServerIP" "INFO" "Cyan"
+    Write-Log "Database: $DatabaseName" "INFO" "Cyan"
+    Write-Log "SQL file: $SQLFilePath" "INFO" "Cyan"
+
+    # Validate SQL file exists locally
+    if (-not (Test-Path $SQLFilePath)) {
+        throw "SQL file not found on local machine: $SQLFilePath"
+    }
+
+    # Set default remote folder path if not provided
+    if ([string]::IsNullOrEmpty($RemoteFolderPath)) {
+        $RemoteFolderPath = "C:\Temp\SQLScripts\"
+        Write-Log "Using default remote folder path: $RemoteFolderPath" "INFO" "Yellow"
+    }
+
+    # Establish remote session
+    Write-Log "Establishing remote session to $RemoteServerIP" "INFO" "Gray"
+    $Session = New-PSSession -ComputerName $RemoteServerIP -Credential $Credential -ErrorAction Stop
+    Write-Log "Connected successfully" "SUCCESS" "Green"
+
+    # Create remote directory if it doesn't exist
+    Write-Log "Creating remote directory if needed: $RemoteFolderPath" "INFO" "Gray"
+    Invoke-Command -Session $Session -ScriptBlock {
+        param($FolderPath)
+        if (-not (Test-Path $FolderPath)) {
+            New-Item -ItemType Directory -Path $FolderPath -Force | Out-Null
+        }
+    } -ArgumentList $RemoteFolderPath
+
+    # Copy SQL file to remote server
+    $SQLFileName = Split-Path $SQLFilePath -Leaf
+    $RemoteSQLFilePath = Join-Path $RemoteFolderPath $SQLFileName
+    
+    Write-Log "Copying SQL file to remote server: $RemoteSQLFilePath" "INFO" "Gray"
+    Copy-Item -Path $SQLFilePath -Destination $RemoteSQLFilePath -ToSession $Session -Force
+    Write-Log "File copied successfully" "SUCCESS" "Green"
+
+    # Execute SQL script on remote server and capture results
+    Write-Log "Executing SQL script on database: $DatabaseName" "INFO" "Gray"
+    Write-Log "----------------------------------------" "INFO" "Gray"
+    
+    $ExecutionResults = Invoke-Command -Session $Session -ScriptBlock {
+        param($RemoteSQLFilePath, $DatabaseName)
+        
+        try {
+            # Verify SQL file exists on remote server
+            if (-not (Test-Path $RemoteSQLFilePath)) {
+                throw "SQL file not found on remote server: $RemoteSQLFilePath"
+            }
+
+            # Read SQL file content
+            $SQLContent = Get-Content -Path $RemoteSQLFilePath -Raw -Encoding UTF8
+            
+            if ([string]::IsNullOrEmpty($SQLContent)) {
+                throw "SQL file is empty"
+            }
+
+            Write-Output "=== SQL SCRIPT CONTENT ==="
+            Write-Output $SQLContent
+            Write-Output "========================="
+            Write-Output ""
+
+            # Execute SQL script against the specified database and capture results
+            Write-Output "Executing SQL script against database: $DatabaseName"
+            
+            # Use Invoke-SqlCmd with the database context and capture output
+            $results = Invoke-SqlCmd -ServerInstance "localhost" -Database $DatabaseName -Query $SQLContent -ErrorAction Stop -OutputSqlErrors $true
+            
+            # Return both success status and results
+            return @{
+                Status = "SUCCESS"
+                Results = $results
+                Message = "SQL script executed successfully"
+            }
+        }
+        catch {
+            $errorMessage = $_.Exception.Message
+            if ($_.Exception.InnerException) {
+                $errorMessage += " | Inner: " + $_.Exception.InnerException.Message
+            }
+            
+            # Return error information
+            return @{
+                Status = "ERROR"
+                Results = $null
+                Message = $errorMessage
+            }
+        }
+        finally {
+            # Clean up the SQL file from remote server
+            if (Test-Path $RemoteSQLFilePath) {
+                Remove-Item -Path $RemoteSQLFilePath -Force -ErrorAction SilentlyContinue
+                Write-Output "Cleaned up temporary SQL file"
+            }
+        }
+    } -ArgumentList $RemoteSQLFilePath, $DatabaseName
+
+    # Display the results
+    if ($ExecutionResults.Status -eq "SUCCESS") {
+        Write-Log "SQL script executed successfully!" "SUCCESS" "Green"
+        Write-Log "Execution Message: $($ExecutionResults.Message)" "INFO" "Green"
+        
+        # Display query results if any
+        if ($ExecutionResults.Results) {
+            $formattedResults = Get-QueryResultsAsString -Results $ExecutionResults.Results
+            # Return this string so Jenkins can capture it
+            return $formattedResults
+        } else {
+            $formattedResults = Get-QueryResultsAsString -Results $null
+            return $formattedResults
+        }
+    } else {
+        throw $ExecutionResults.Message
+    }
+}
+catch {
+    Write-Log "Error during SQL execution process: $($_.Exception.Message)" "ERROR" "Red"
+    
+    # More detailed error information
+    if ($_.Exception.InnerException) {
+        Write-Log "Inner exception: $($_.Exception.InnerException.Message)" "ERROR" "Red"
+    }
+    
+    exit 1
+}
+finally {
+    # Clean up session
+    if ($Session) {
+        Remove-PSSession $Session -ErrorAction SilentlyContinue
+        Write-Log "Remote session closed" "INFO" "Gray"
+    }
+}
+
+Write-Log "SQL script execution completed" "SUCCESS" "Green"
+
+
+scripts\execute-query.ps1
+=========================
+param(
+    [Parameter(Mandatory=$true)]
+    [string]$RemoteServerIP,
+    
+    [Parameter(Mandatory=$true)]
+    [string]$Username,
+    
+    [Parameter(Mandatory=$false)]
+    [string]$RemoteFolderPath,
+    
+    [Parameter(Mandatory=$false)]
+    [string]$SQLFilePath,
+    
+    [Parameter(Mandatory=$false)]
+    [string]$DatabaseName
+)
+
+
+# Convert plain text password to SecureString (handles special characters)
+Write-Host "[INFO] Converting password to SecureString" -ForegroundColor Green
+$passwordFilePath = "Automated-MS-SQL-Backup-Restore-Job\password.txt"
+if (-not (Test-Path $passwordFilePath)) {
+    throw "Password file not found at: $passwordFilePath"
+}
+$fileContent = Get-Content $passwordFilePath -Raw
+$password = ($fileContent -replace '[^\x00-\x7F]', '').Trim()
+if ([string]::IsNullOrEmpty($password)) {
+    throw "Password file contains no valid ASCII characters after cleaning"
+}
+$securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+Write-Host "Password successfully converted to secure string Where UserName is $Username" -ForegroundColor Green
+$Credential = New-Object System.Management.Automation.PSCredential ($Username, $securePassword)
+
+# Function for logging
+function Write-Log {
+    param(
+        [string]$Message,
+        [string]$Level = "INFO",
+        [string]$Color = "White"
+    )
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logMessage = "[$timestamp] [$Level] $Message"
+    Write-Host $logMessage -ForegroundColor $Color
+}
+
+# Function to display query results in a formatted table
+function Get-QueryResultsAsString {
+    param($Results)
+    
+    $output = ""
+    
+    if ($Results -and $Results.Count -gt 0) {
+        # Convert results to formatted table string
+        $tableString = $Results | Format-Table -AutoSize | Out-String -Width 4096
+        $tableLines = $tableString.Trim() -split "`r?`n"
+        
+        # Find the longest line for border width
+        $maxWidth = 0
+        foreach ($line in $tableLines) {
+            if ($line.Length -gt $maxWidth) {
+                $maxWidth = $line.Length
+            }
+        }
+        
+        # Add padding for borders
+        $borderWidth = $maxWidth + 4
+        
+        # Create title for top border
+        $title = " Restore Test "
+        $titleLine = "*" * 12 + $title + "*" * (($borderWidth - 12 - $title.Length) + 1)
+        
+        # Create bottom border
+        $bottomBorder = "*" * $borderWidth
+        
+        # Build the output string
+        $output += $titleLine + "`r`n"
+        
+        foreach ($line in $tableLines) {
+            $paddedLine = " * " + $line.PadRight($maxWidth) + " * "
+            $output += $paddedLine + "`r`n"
+        }
+        
+        $output += $bottomBorder + "`r`n"
+        
+    } else {
+        # For empty results
+        $message = "Query executed successfully (no rows returned)"
+        $borderWidth = $message.Length + 4
+        
+        $title = " Restore Test "
+        $titleLine = "*" * 12 + $title + "*" * (($borderWidth - 12 - $title.Length) + 1)
+        $bottomBorder = "*" * $borderWidth
+        
+        $output += $titleLine + "`r`n"
+        $output += " * " + $message.PadRight($message.Length) + " * " + "`r`n"
+        $output += $bottomBorder + "`r`n"
+    }
+    
+    return $output
+}
+
+try {
+    Write-Log "Starting SQL script execution process" "INFO" "Cyan"
+    Write-Log "Target server: $RemoteServerIP" "INFO" "Cyan"
+    Write-Log "Database: $DatabaseName" "INFO" "Cyan"
+    Write-Log "SQL file: $SQLFilePath" "INFO" "Cyan"
+
+    # Validate SQL file exists locally
+    if (-not (Test-Path $SQLFilePath)) {
+        throw "SQL file not found on local machine: $SQLFilePath"
+    }
+
+    # Set default remote folder path if not provided
+    if ([string]::IsNullOrEmpty($RemoteFolderPath)) {
+        $RemoteFolderPath = "C:\Temp\SQLScripts\"
+        Write-Log "Using default remote folder path: $RemoteFolderPath" "INFO" "Yellow"
+    }
+
+    # Establish remote session
+    Write-Log "Establishing remote session to $RemoteServerIP" "INFO" "Gray"
+    $Session = New-PSSession -ComputerName $RemoteServerIP -Credential $Credential -ErrorAction Stop
+    Write-Log "Connected successfully" "SUCCESS" "Green"
+
+    # Create remote directory if it doesn't exist
+    Write-Log "Creating remote directory if needed: $RemoteFolderPath" "INFO" "Gray"
+    Invoke-Command -Session $Session -ScriptBlock {
+        param($FolderPath)
+        if (-not (Test-Path $FolderPath)) {
+            New-Item -ItemType Directory -Path $FolderPath -Force | Out-Null
+        }
+    } -ArgumentList $RemoteFolderPath
+
+    # Copy SQL file to remote server
+    $SQLFileName = Split-Path $SQLFilePath -Leaf
+    $RemoteSQLFilePath = Join-Path $RemoteFolderPath $SQLFileName
+    
+    Write-Log "Copying SQL file to remote server: $RemoteSQLFilePath" "INFO" "Gray"
+    Copy-Item -Path $SQLFilePath -Destination $RemoteSQLFilePath -ToSession $Session -Force
+    Write-Log "File copied successfully" "SUCCESS" "Green"
+
+    # Execute SQL script on remote server and capture results
+    Write-Log "Executing SQL script on database: $DatabaseName" "INFO" "Gray"
+    Write-Log "----------------------------------------" "INFO" "Gray"
+    
+    $ExecutionResults = Invoke-Command -Session $Session -ScriptBlock {
+        param($RemoteSQLFilePath, $DatabaseName)
+        
+        try {
+            # Verify SQL file exists on remote server
+            if (-not (Test-Path $RemoteSQLFilePath)) {
+                throw "SQL file not found on remote server: $RemoteSQLFilePath"
+            }
+
+            # Read SQL file content
+            $SQLContent = Get-Content -Path $RemoteSQLFilePath -Raw -Encoding UTF8
+            
+            if ([string]::IsNullOrEmpty($SQLContent)) {
+                throw "SQL file is empty"
+            }
+
+            Write-Output "=== SQL SCRIPT CONTENT ==="
+            Write-Output $SQLContent
+            Write-Output "========================="
+            Write-Output ""
+
+            # Execute SQL script against the specified database and capture results
+            Write-Output "Executing SQL script against database: $DatabaseName"
+            
+            # Use Invoke-SqlCmd with the database context and capture output
+            $results = Invoke-SqlCmd -ServerInstance "localhost" -Database $DatabaseName -Query $SQLContent -ErrorAction Stop -OutputSqlErrors $true
+            
+            # Return both success status and results
+            return @{
+                Status = "SUCCESS"
+                Results = $results
+                Message = "SQL script executed successfully"
+            }
+        }
+        catch {
+            $errorMessage = $_.Exception.Message
+            if ($_.Exception.InnerException) {
+                $errorMessage += " | Inner: " + $_.Exception.InnerException.Message
+            }
+            
+            # Return error information
+            return @{
+                Status = "ERROR"
+                Results = $null
+                Message = $errorMessage
+            }
+        }
+        finally {
+            # Clean up the SQL file from remote server
+            if (Test-Path $RemoteSQLFilePath) {
+                Remove-Item -Path $RemoteSQLFilePath -Force -ErrorAction SilentlyContinue
+                Write-Output "Cleaned up temporary SQL file"
+            }
+        }
+    } -ArgumentList $RemoteSQLFilePath, $DatabaseName
+
+    # Display the results
+    if ($ExecutionResults.Status -eq "SUCCESS") {
+        Write-Log "SQL script executed successfully!" "SUCCESS" "Green"
+        Write-Log "Execution Message: $($ExecutionResults.Message)" "INFO" "Green"
+        
+        # Display query results if any
+        if ($ExecutionResults.Results) {
+            $formattedResults = Get-QueryResultsAsString -Results $ExecutionResults.Results
+            # Return this string so Jenkins can capture it
+            return $formattedResults
+        } else {
+            $formattedResults = Get-QueryResultsAsString -Results $null
+            return $formattedResults
+        }
+    } else {
+        throw $ExecutionResults.Message
+    }
+}
+catch {
+    Write-Log "Error during SQL execution process: $($_.Exception.Message)" "ERROR" "Red"
+    
+    # More detailed error information
+    if ($_.Exception.InnerException) {
+        Write-Log "Inner exception: $($_.Exception.InnerException.Message)" "ERROR" "Red"
+    }
+    
+    exit 1
+}
+finally {
+    # Clean up session
+    if ($Session) {
+        Remove-PSSession $Session -ErrorAction SilentlyContinue
+        Write-Log "Remote session closed" "INFO" "Gray"
+    }
+}
+
+Write-Log "SQL script execution completed" "SUCCESS" "Green"
+
+
+scripts\last-monday.ps1
+=======================
+# Get current date
+$currentDate = Get-Date
+$month = $currentDate.Month
+$dayName = $currentDate.DayOfWeek
+$year = $currentDate.Year
+
+Write-Host "Current Date: $($currentDate.ToString('yyyy-MM-dd'))"
+Write-Host "Day: $dayName, Month: $month, Year: $year"
+
+# Check if today is Monday and the last Monday of the month
+$isLastMonday = $false
+
+if ($dayName -eq "Monday") {
+    $lastDayOfMonth = (Get-Date -Year $year -Month $month -Day 1).AddMonths(1).AddDays(-1)
+    $lastMonday = $lastDayOfMonth
+    while ($lastMonday.DayOfWeek -ne "Monday") {
+        $lastMonday = $lastMonday.AddDays(-1)
+    }
+    
+    if ($currentDate.Date -eq $lastMonday.Date) {
+        Write-Host "This is last Monday of the month, we will execute"
+        $isLastMonday = $true
+    } else {
+        Write-Host "Sorry, let's wait till last Monday!"
+    }
+} else {
+    Write-Host "Sorry, let's wait till last Monday!"
+}
+
+# Return boolean value for Jenkins to capture
+return $isLastMonday
+
+
+scripts\remove-trusted-host.ps1
+===============================
+param(
+    [string]$IPAddress = ''
+)
+
+# Enhanced logging function
+function Write-Log {
+    param(
+        [string]$Message,
+        [string]$Level = "INFO",
+        [string]$Color = "White"
+    )
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logMessage = "[$timestamp] [$Level] $Message"
+    Write-Host $logMessage -ForegroundColor $Color
+}
+
+# Function to parse trusted hosts string into individual entries
+function Get-TrustedHostsEntries {
+    param([string]$TrustedHostsString)
+    
+    if ([string]::IsNullOrEmpty($TrustedHostsString)) {
+        return @()
+    }
+    
+    # Split by comma and remove empty/whitespace entries, then trim each entry
+    $entries = $TrustedHostsString -split ',' | 
+               Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | 
+               ForEach-Object { $_.Trim() }
+    
+    return $entries
+}
+
+# Function to remove IP from trusted hosts list
+function Remove-IPFromTrustedHosts {
+    param(
+        [string]$IPToRemove,
+        [string]$TrustedHostsString
+    )
+    
+    $entries = Get-TrustedHostsEntries $TrustedHostsString
+    $updatedEntries = @()
+    $removedCount = 0
+    
+    foreach ($entry in $entries) {
+        # Check for exact match (case insensitive)
+        if ($entry -eq $IPToRemove) {
+            $removedCount++
+            Write-Log "Removing IP: $entry" "INFO" "Yellow"
+            continue
+        }
+        
+        # Keep entries that don't match the IP to remove
+        $updatedEntries += $entry
+    }
+    
+    # Join remaining entries back into comma-separated string
+    $newTrustedHosts = $updatedEntries -join ','
+    
+    return @{
+        NewTrustedHosts = $newTrustedHosts
+        RemovedCount = $removedCount
+    }
+}
+
+# Configuration
+$backupDir = "C:\backup"
+$dateStamp = Get-Date -Format "yyyy_MM_dd_HH_mm"
+$backupFile = "$backupDir\TrustedHosts_$dateStamp.txt"
+
+Write-Log "Starting Trusted Hosts removal operation" "INFO" "Cyan"
+Write-Log "Target IP to remove: $IPAddress" "INFO" "Cyan"
+Write-Log "Backup file: $backupFile" "INFO" "Cyan"
+
+# Validate IP address format
+try {
+    Write-Log "Validating IP address format..." "INFO" "Gray"
+    if ([string]::IsNullOrWhiteSpace($IPAddress)) {
+        throw "IP address cannot be empty"
+    }
+    
+    # Basic IP validation (can be IPv4, IPv6, or hostname)
+    if ($IPAddress -notmatch '^[a-zA-Z0-9\.\:\-\*]+$') {
+        throw "Invalid IP address format: $IPAddress"
+    }
+    
+    Write-Log "IP address format validation passed" "SUCCESS" "Green"
+}
+catch {
+    Write-Log "IP VALIDATION ERROR: $($_.Exception.Message)" "ERROR" "Red"
+    exit 1
+}
+
+# Ensure backup directory exists
+Write-Log "Checking backup directory existence..." "INFO" "Gray"
+if (!(Test-Path $backupDir)) {
+    try {
+        Write-Log "Creating backup directory: $backupDir" "INFO" "Yellow"
+        $null = New-Item -Path $backupDir -ItemType Directory -Force
+        Write-Log "Backup directory created successfully" "SUCCESS" "Green"
+    }
+    catch {
+        Write-Log "CRITICAL: Error creating backup directory: $($_.Exception.Message)" "ERROR" "Red"
+        Write-Log "Operation aborted - cannot proceed without backup directory" "ERROR" "Red"
+        exit 1
+    }
+} else {
+    Write-Log "Backup directory already exists" "INFO" "Gray"
+}
+
+# Backup current trusted hosts
+Write-Log "Starting backup of current trusted hosts..." "INFO" "Cyan"
+try {
+    $currentTrustedHosts = (Get-Item WSMan:\localhost\Client\TrustedHosts -ErrorAction Stop).Value
+    
+    if ([string]::IsNullOrEmpty($currentTrustedHosts)) {
+        $backupContent = "No trusted hosts configured as of $((Get-Date).ToString())`r`n# IP removal requested: $IPAddress"
+        Write-Log "No existing trusted hosts found - nothing to remove" "WARNING" "Yellow"
+        
+        # Still create backup
+        $backupContent | Out-File -FilePath $backupFile -Encoding UTF8 -Force
+        Write-Log "Backup created: $backupFile" "INFO" "Green"
+        Write-Log "Operation completed - no IPs to remove" "INFO" "Green"
+        exit 0
+    }
+    else {
+        $backupContent = "$currentTrustedHosts`r`n# Backup created on: $(Get-Date)`r`n# IP removal requested: $IPAddress"
+        Write-Log "Current trusted hosts retrieved: $currentTrustedHosts" "INFO" "Yellow"
+        
+        # Check if IP exists in trusted hosts
+        Write-Log "Checking if IP address exists in trusted hosts..." "INFO" "Gray"
+        $entries = Get-TrustedHostsEntries $currentTrustedHosts
+        $ipExists = $false
+        
+        foreach ($entry in $entries) {
+            if ($entry -eq $IPAddress) {
+                $ipExists = $true
+                break
+            }
+        }
+        
+        if (-not $ipExists) {
+            Write-Log "IP address $IPAddress not found in trusted hosts list" "WARNING" "Yellow"
+            Write-Log "No changes needed - operation completed" "INFO" "Green"
+            
+            # Still create backup
+            $backupContent | Out-File -FilePath $backupFile -Encoding UTF8 -Force
+            Write-Log "Backup created at: $backupFile" "INFO" "Green"
+            exit 0
+        }
+    }
+    
+    # Create backup file with force to overwrite if exists
+    $backupContent | Out-File -FilePath $backupFile -Encoding UTF8 -Force
+    Write-Log "Backup completed successfully: $backupFile" "SUCCESS" "Green"
+    
+    # Verify file was actually created
+    if (Test-Path $backupFile) {
+        $fileInfo = Get-Item $backupFile
+        Write-Log "Backup file verified: $($fileInfo.FullName)" "SUCCESS" "Green"
+        Write-Log "File size: $($fileInfo.Length) bytes" "INFO" "Gray"
+    } else {
+        Write-Log "WARNING: Backup file creation may have failed - file not found" "WARNING" "Yellow"
+    }
+}
+catch [System.Management.Automation.ItemNotFoundException] {
+    Write-Log "WSMan TrustedHosts path not found. This might be expected if never configured." "INFO" "Yellow"
+    $backupContent = "WSMan TrustedHosts path not found - likely never configured as of $(Get-Date)`r`n# IP removal requested: $IPAddress"
+    
+    # Create backup file with force
+    $backupContent | Out-File -FilePath $backupFile -Encoding UTF8 -Force
+    Write-Log "Backup created for non-existent configuration: $backupFile" "INFO" "Yellow"
+    Write-Log "Operation completed - no IPs to remove" "INFO" "Green"
+    exit 0
+}
+catch [System.UnauthorizedAccessException] {
+    Write-Log "ACCESS DENIED: Insufficient permissions to read WSMan configuration" "ERROR" "Red"
+    Write-Log "Please run PowerShell as Administrator" "ERROR" "Red"
+    exit 1
+}
+catch {
+    Write-Log "UNEXPECTED ERROR during backup: $($_.Exception.Message)" "ERROR" "Red"
+    Write-Log "Error type: $($_.Exception.GetType().Name)" "ERROR" "Red"
+    exit 1
+}
+
+# Remove IP from trusted hosts
+Write-Log "Attempting to remove IP address from trusted hosts..." "INFO" "Cyan"
+try {
+    Write-Log "Removing IP: $IPAddress" "INFO" "Yellow"
+    
+    # Check if we're running as administrator (required for this operation)
+    $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
+    if (-not $isAdmin) {
+        throw "Administrator privileges required. Please run PowerShell as Administrator."
+    }
+    
+    # Remove the IP from the trusted hosts list
+    $removalResult = Remove-IPFromTrustedHosts -IPToRemove $IPAddress -TrustedHostsString $currentTrustedHosts
+    
+    if ($removalResult.RemovedCount -eq 0) {
+        Write-Log "No instances of IP address $IPAddress found to remove" "WARNING" "Yellow"
+        Write-Log "Operation completed - no changes made" "INFO" "Green"
+        exit 0
+    }
+    
+    Write-Log "Removed $($removalResult.RemovedCount) instance(s) of IP address" "SUCCESS" "Green"
+    
+    # Update the trusted hosts list
+    if ([string]::IsNullOrEmpty($removalResult.NewTrustedHosts)) {
+        Write-Log "All trusted hosts removed - setting empty value" "INFO" "Yellow"
+        Set-Item WSMan:\localhost\Client\TrustedHosts -Value "" -Force
+    } else {
+        Set-Item WSMan:\localhost\Client\TrustedHosts -Value $removalResult.NewTrustedHosts -Force
+    }
+    
+    # Verify the update
+    $updatedList = (Get-Item WSMan:\localhost\Client\TrustedHosts -ErrorAction Stop).Value
+    Write-Log "Update successful! New trusted hosts list: $updatedList" "SUCCESS" "Green"
+    
+    # Additional verification - check if IP was actually removed
+    $finalEntries = Get-TrustedHostsEntries $updatedList
+    $ipStillExists = $false
+    
+    foreach ($entry in $finalEntries) {
+        if ($entry -eq $IPAddress) {
+            $ipStillExists = $true
+            break
+        }
+    }
+    
+    if (-not $ipStillExists) {
+        Write-Log "IP address $IPAddress confirmed removed from trusted hosts list" "SUCCESS" "Green"
+    } else {
+        Write-Log "WARNING: IP address may not have been removed completely" "WARNING" "Yellow"
+    }
+}
+catch [System.UnauthorizedAccessException] {
+    Write-Log "ACCESS DENIED: Administrator privileges required to modify WSMan configuration" "ERROR" "Red"
+    Write-Log "Please run PowerShell as Administrator and try again" "ERROR" "Red"
+    Write-Log "Backup was successfully created at: $backupFile" "INFO" "Yellow"
+    exit 1
+}
+catch [System.Management.Automation.PSArgumentException] {
+    Write-Log "INVALID INPUT: Error modifying trusted hosts list" "ERROR" "Red"
+    Write-Log "Error details: $($_.Exception.Message)" "ERROR" "Red"
+    exit 1
+}
+catch {
+    Write-Log "UNEXPECTED ERROR during removal: $($_.Exception.Message)" "ERROR" "Red"
+    Write-Log "Error type: $($_.Exception.GetType().Name)" "ERROR" "Red"
+    Write-Log "Backup was successfully created at: $backupFile" "INFO" "Yellow"
+    exit 1
+}
+
+Write-Log "IP removal operation completed successfully!" "SUCCESS" "Green"
+Write-Log "Backup location: $backupFile" "INFO" "Gray"
+Write-Log "Final trusted hosts: $updatedList" "INFO" "Gray"
+
+# Final verification that backup file exists
+if (Test-Path $backupFile) {
+    Write-Log "Final verification: Backup file exists at $backupFile" "SUCCESS" "Green"
+} else {
+    Write-Log "ERROR: Backup file was not created successfully" "ERROR" "Red"
+}
+
+
+scripts\restore-db-sqlcmd.ps1
+=============================
+param(
+    [Parameter(Mandatory=$true)]
+    [string]$RemoteServerIP,
+    
+    [Parameter(Mandatory=$true)]
+    [string]$Username,
+    
+    [Parameter(Mandatory=$false)]
+    [string]$RemoteFolderPath,
+    
+    [Parameter(Mandatory=$false)]
+    [string]$FilePrefix,
+    
+    [Parameter(Mandatory=$false)]
+    [string]$DatabaseName
+)
+
+
+
+# Convert plain text password to SecureString (handles special characters)
+Write-Host "[INFO] Converting password to SecureString" -ForegroundColor Green
+$passwordFilePath = "Automated-MS-SQL-Backup-Restore-Job\password.txt"
+if (-not (Test-Path $passwordFilePath)) {
+    throw "Password file not found at: $passwordFilePath"
+}
+$fileContent = Get-Content $passwordFilePath -Raw
+$password = ($fileContent -replace '[^\x00-\x7F]', '').Trim()
+if ([string]::IsNullOrEmpty($password)) {
+    throw "Password file contains no valid ASCII characters after cleaning"
+}
+$securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+Write-Host "Password successfully converted to secure string Where UserName is $Username" -ForegroundColor Green
+$Credential = New-Object System.Management.Automation.PSCredential ($Username, $securePassword)
+
+# Function for logging
+function Write-Log {
+    param(
+        [string]$Message,
+        [string]$Level = "INFO",
+        [string]$Color = "White"
+    )
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logMessage = "[$timestamp] [$Level] $Message"
+    Write-Host $logMessage -ForegroundColor $Color
+}
+
+try {
+    Write-Log "Starting database restore process" "INFO" "Cyan"
+    Write-Log "Target server: $RemoteServerIP" "INFO" "Cyan"
+    Write-Log "Database: $DatabaseName" "INFO" "Cyan"
+
+    # Establish remote session without SSL
+    Write-Log "Establishing remote session to $RemoteServerIP (non-SSL)" "INFO" "Gray"
+    $Session = New-PSSession -ComputerName $RemoteServerIP -Credential $Credential -ErrorAction Stop
+    Write-Log "Connected successfully without SSL" "SUCCESS" "Green"
+
+    # Find the latest backup file
+    Write-Log "Searching for latest backup file with prefix: $FilePrefix" "INFO" "Gray"
+    $BackupFile = Invoke-Command -Session $Session -ScriptBlock {
+        param($RemoteFolderPath, $FilePrefix)
+        
+        try {
+            if (-not (Test-Path $RemoteFolderPath)) {
+                throw "Remote folder path does not exist: $RemoteFolderPath"
+            }
+            
+            $BackupFiles = Get-ChildItem -Path $RemoteFolderPath -Filter "$FilePrefix*.BAK" -ErrorAction Stop | 
+                           Sort-Object LastWriteTime -Descending | 
+                           Select-Object -First 1
+        
+            if ($BackupFiles) {
+                return $BackupFiles.FullName
+            } else {
+                return $null
+            }
+        }
+        catch {
+            throw "Error searching for backup files: $($_.Exception.Message)"
+        }
+    } -ArgumentList $RemoteFolderPath, $FilePrefix
+
+    if (-not $BackupFile) {
+        throw "No backup files found with prefix '$FilePrefix' in $RemoteFolderPath"
+    }
+
+    Write-Log "Found backup file: $BackupFile" "SUCCESS" "Green"
+
+    # Restore the database with proper logical file detection
+    Write-Log "Starting database restore from $BackupFile" "INFO" "Gray"
+    
+    $RestoreResult = Invoke-Command -Session $Session -ScriptBlock {
+        param($BackupFile, $DatabaseName)
+        
+        try {
+            # Verify backup file exists
+            if (-not (Test-Path $BackupFile)) {
+                throw "Backup file not found: $BackupFile"
+            }
+
+            # Get SQL Server data directory path
+            Write-Output "Getting SQL Server data directory..."
+            $DataPathResult = Invoke-SqlCmd -Query "SELECT SERVERPROPERTY('InstanceDefaultDataPath') AS DataPath, SERVERPROPERTY('InstanceDefaultLogPath') AS LogPath" -ErrorAction Stop
+            $DataDirectory = $DataPathResult.DataPath
+            $LogDirectory = $DataPathResult.LogPath
+            
+            if (-not $DataDirectory -or -not $LogDirectory) {
+                # Use default paths if not found
+                $DataDirectory = "C:\Program Files\Microsoft SQL Server\MSSQL*.MSSQLSERVER\MSSQL\DATA\"
+                $LogDirectory = "C:\Program Files\Microsoft SQL Server\MSSQL*.MSSQLSERVER\MSSQL\DATA\"
+                
+                # Try to find the actual data directory
+                $PossiblePaths = @(
+                    "C:\Program Files\Microsoft SQL Server\MSSQL16.MSSQLSERVER\MSSQL\DATA\",
+                    "C:\Program Files\Microsoft SQL Server\MSSQL15.MSSQLSERVER\MSSQL\DATA\",
+                    "C:\Program Files\Microsoft SQL Server\MSSQL14.MSSQLSERVER\MSSQL\DATA\",
+                    "C:\Program Files\Microsoft SQL Server\MSSQL13.MSSQLSERVER\MSSQL\DATA\"
+                )
+                
+                foreach ($path in $PossiblePaths) {
+                    if (Test-Path $path) {
+                        $DataDirectory = $path
+                        $LogDirectory = $path
+                        break
+                    }
+                }
+            }
+            
+            Write-Output "Data directory: $DataDirectory"
+            Write-Output "Log directory: $LogDirectory"
+
+            # Create directories if they don't exist
+            if (-not (Test-Path $DataDirectory)) {
+                Write-Output "Creating data directory: $DataDirectory"
+                New-Item -ItemType Directory -Path $DataDirectory -Force | Out-Null
+            }
+            
+            if (-not (Test-Path $LogDirectory)) {
+                Write-Output "Creating log directory: $LogDirectory"
+                New-Item -ItemType Directory -Path $LogDirectory -Force | Out-Null
+            }
+
+            # Get logical file names from backup
+            Write-Output "Reading logical file names from backup..."
+            $FileList = Invoke-SqlCmd -Query "RESTORE FILELISTONLY FROM DISK = '$BackupFile'" -ErrorAction Stop
+            
+            $DataFile = $FileList | Where-Object { $_.Type -eq 'D' } | Select-Object -First 1
+            $LogFile = $FileList | Where-Object { $_.Type -eq 'L' } | Select-Object -First 1
+            
+            if (-not $DataFile -or -not $LogFile) {
+                throw "Could not find data and log files in backup"
+            }
+            
+            $DataLogicalName = $DataFile.LogicalName
+            $LogLogicalName = $LogFile.LogicalName
+            
+            Write-Output "Data file: $DataLogicalName"
+            Write-Output "Log file: $LogLogicalName"
+
+            # Build the restore command with correct paths
+            $MdfPath = Join-Path $DataDirectory "$DatabaseName.mdf"
+            $LdfPath = Join-Path $LogDirectory "$DatabaseName.ldf"
+            
+            Write-Output "MDF path: $MdfPath"
+            Write-Output "LDF path: $LdfPath"
+
+            $RestoreCommand = @"
+            RESTORE DATABASE [$DatabaseName] 
+            FROM DISK = '$BackupFile'
+            WITH REPLACE, RECOVERY,
+            MOVE '$DataLogicalName' TO '$MdfPath',
+            MOVE '$LogLogicalName' TO '$LdfPath'
+"@
+        
+            Write-Output "Executing restore command..."
+            # Execute the restore command
+            Invoke-SqlCmd -Query $RestoreCommand -ErrorAction Stop -QueryTimeout 7200
+            return "SUCCESS"
+        }
+        catch {
+            return "ERROR: $($_.Exception.Message)"
+        }
+    } -ArgumentList $BackupFile, $DatabaseName
+
+    if ($RestoreResult -eq "SUCCESS") {
+        Write-Log "Database restore completed successfully!" "SUCCESS" "Green"
+    } else {
+        throw $RestoreResult
+    }
+}
+catch {
+    Write-Log "Error during restore process: $($_.Exception.Message)" "ERROR" "Red"
+    
+    # More detailed error information
+    if ($_.Exception.InnerException) {
+        Write-Log "Inner exception: $($_.Exception.InnerException.Message)" "ERROR" "Red"
+    }
+    
+    exit 1
+}
+finally {
+    # Clean up session
+    if ($Session) {
+        Remove-PSSession $Session -ErrorAction SilentlyContinue
+        Write-Log "Remote session closed" "INFO" "Gray"
+    }
+}
+
+Write-Log "Database restore operation completed" "SUCCESS" "Green"
+
+
+backend.tf
+==========
+terraform {
+  backend "s3" {
+    bucket   = "YOUR_TF_STATE_BUCKET_NAME"           # Your existing S3 bucket name
+    key      = "YOUR_PREFIX/sql-server.tfstate"  # Your desired path/prefix
+    region   = "us-east-1"              # Region where bucket exists
+    encrypt  = true                     # Enable encryption (recommended)
+  }
+}
+
+main.tf
+=======
+module "vpc" {
+  source = "./modules/vpc"
+
+  vpc_cidr           = var.vpc_cidr
+  public_subnet_cidr = var.public_subnet_cidr
+  region             = var.region
+}
+
+module "windows_sql_server" {
+  source = "./modules/ec2-windows-sql"
+
+  vpc_id             = module.vpc.vpc_id
+  subnet_id          = module.vpc.public_subnet_id
+  allowed_ips        = var.allowed_ips
+  winrm_ips          = var.winrm_ips
+  key_name           = var.key_name
+  instance_name      = var.instance_name
+  instance_type      = var.instance_type
+  volume_size        = var.volume_size
+  volume_type        = var.volume_type
+  iops               = var.iops
+  throughput         = var.throughput
+  region             = var.region
+  terraform_role_arn = var.terraform_role_arn
+  ec2_instance_role_arn = var.ec2_instance_role_arn
+
+}
+
+
+outputs.tf
+==========
+output "instance_public_ip" {
+  description = "Public IP address of the Windows SQL Server instance"
+  value       = module.windows_sql_server.instance_public_ip
+}
+
+output "rdp_connection_command" {
+  description = "RDP connection command"
+  value       = module.windows_sql_server.rdp_connection_command
+}
+
+output "key_pair_name" {
+  description = "Name of the generated key pair"
+  value       = module.windows_sql_server.key_pair_name
+}
+
+output "vpc_id" {
+  description = "ID of the created VPC"
+  value       = module.vpc.vpc_id
+}
+
+
+providers.tf
+============
+terraform {
+  required_version = ">= 1.0"
+  
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.4"
+    }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.2"
+    }
+  }
+}
+
+# Default provider for most resources
+provider "aws" {
+  region = var.region
+  assume_role {
+    role_arn = var.terraform_role_arn
+  }
+}
+
+
+provider "tls" {
+  # TLS provider configuration
+}
+
+provider "local" {
+  # Local provider configuration
+}
+
+provider "null" {
+  # Null provider configuration
+}
+
+
+terraform.tfvars
+================
+# AWS Configuration
+ec2_instance_role_arn = "YOUR_EC2_INSTANCE_ROLE_ARN"
+terraform_role_arn    = "arn:aws:iam::YOUR_TEST_ACCOUNT_ID:role/restore"
+region      = "us-east-1"
+
+# Security - REQUIRED: Replace with your actual IP
+allowed_ips = ["YOUR_OFFICE_HOME_IP/32"]
+winrm_ips = ["YOUR_GATEWAY_IP/32"]
+
+# Networking
+vpc_cidr           = "10.1.0.0/16"
+public_subnet_cidr = "10.1.0.0/24"
+
+# EC2 Instance
+key_name      = "windows-sql-key"
+instance_name = "windows-sql-server-2022"
+instance_type = "t3.xlarge"
+volume_size   = 200
+volume_type   = "gp3"
+iops          = 3000
+throughput    = 125
+
+
+
+variables.tf
+============
+# AWS Configuration
+variable "aws_profile" {
+  description = "AWS CLI profile name to use for backend operations"
+  type        = string
+  default     = null
+}
+
+variable "region" {
+  description = "AWS region"
+  type        = string
+  default     = null
+}
+
+variable "terraform_role_arn" {
+  description = "ARN of the role for Terraform to assume for resource operations"
+  type        = string
+  default     = null
+}
+
+
+variable "ec2_instance_role_arn" {
+  description = "ARN of an existing IAM role to attach to the EC2 instance"
+  type        = string
+  default     = null
+}
+# Networking
+variable "vpc_cidr" {
+  description = "CIDR block for the VPC"
+  type        = string
+  default     = "10.0.0.0/16"
+}
+
+variable "public_subnet_cidr" {
+  description = "CIDR block for the public subnet"
+  type        = string
+  default     = "10.0.1.0/24"
+}
+
+# Security
+variable "allowed_ips" {
+  description = "List of allowed IP addresses for RDP access"
+  type        = list(string)
+  default     = []
+  validation {
+    condition     = length(var.allowed_ips) > 0
+    error_message = "At least one allowed IP must be specified for security reasons."
+  }
+}
+
+variable "winrm_ips" {
+  description = "List of allowed IP addresses for WinRM access"
+  type        = list(string)
+  default     = []
+  validation {
+    condition     = length(var.winrm_ips) > 0
+    error_message = "At least one allowed IP must be specified for security reasons."
+  }
+}
+
+# EC2 Instance
+variable "instance_name" {
+  description = "Name tag for the EC2 instance"
+  type        = string
+  default     = "windows-sql-server"
+}
+
+variable "key_name" {
+  description = "Name of the key pair"
+  type        = string
+  default     = "windows-sql-key"
+}
+
+variable "instance_type" {
+  description = "EC2 instance type"
+  type        = string
+  default     = "t3.xlarge"
+}
+
+variable "volume_size" {
+  description = "Root volume size in GiB"
+  type        = number
+  default     = 200
+}
+
+variable "volume_type" {
+  description = "Root volume type"
+  type        = string
+  default     = "gp3"
+}
+
+variable "iops" {
+  description = "IOPS for gp3 volume (0 means default)"
+  type        = number
+  default     = 3000
+}
+
+variable "throughput" {
+  description = "Throughput for gp3 volume in MB/s (0 means default)"
+  type        = number
+  default     = 125
+}
+
+
+
