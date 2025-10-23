@@ -75,13 +75,6 @@ resource "aws_security_group" "ecs" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
   egress {
     from_port   = 0
     to_port     = 0
@@ -146,7 +139,7 @@ resource "aws_ecs_task_definition" "main" {
 resource "aws_lb" "main" {
   name               = "${var.project_name}-alb"
   internal           = false
-  load_balancer_type = "loadbalancer"
+  load_balancer_type = "application" # FIXED: Changed from "loadbalancer" to "application"
   security_groups    = [aws_security_group.ecs.id]
   subnets            = aws_subnet.public[*].id
 
