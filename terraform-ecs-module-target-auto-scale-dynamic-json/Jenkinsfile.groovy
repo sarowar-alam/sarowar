@@ -3,7 +3,7 @@ pipeline {
     
     environment {
         AWS_ACCOUNT_ID = '388779989543'
-        AWS_REGION = 'us-east-1'
+        AWS_REGION = 'ap-south-1'
         ECR_REPO_NAME = 'cpu-load-test'
         PROJECT_NAME = 'cpu-load-test-app'
         SOURCE_DIRECTORY = 'terraform-ecs-module-target-auto-scale-dynamic-json'
