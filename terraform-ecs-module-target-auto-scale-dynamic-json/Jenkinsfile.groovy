@@ -48,7 +48,7 @@ pipeline {
                 script {
                     dir(env.SOURCE_DIRECTORY) {
                         sh "ls -lrth"
-                        sh "docker build -t ${ECR_REPO_NAME}:${BUILD_ID} ."
+                        sh "sudo docker build -t ${ECR_REPO_NAME}:${BUILD_ID} ."
                     }
                 }
             }
