@@ -41,6 +41,12 @@
         .stop-btn:hover {
             background-color: #c82333;
         }
+        .real-btn {
+            background-color: #28a745;
+        }
+        .real-btn:hover {
+            background-color: #218838;
+        }
         .status {
             margin: 20px 0;
             padding: 15px;
@@ -54,6 +60,10 @@
             background-color: #d4edda;
             border: 1px solid #c3e6cb;
         }
+        .real-loading {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+        }
         .info {
             background-color: #d1ecf1;
             border: 1px solid #bee5eb;
@@ -63,24 +73,35 @@
 <body>
     <div class="container">
         <h1>CPU Load Test Application</h1>
-        <p>Click the button below to simulate CPU load (100% utilization)</p>
+        <p>Click the buttons below to generate actual CPU load for auto-scaling testing</p>
         
         <div class="status info">
-            <strong>Note:</strong> This is a simulation. In a production environment, this would generate actual CPU load.
+            <strong>Auto-scaling Info:</strong> When CPU utilization exceeds 50%, ECS will scale from 1 to 3 tasks.
         </div>
         
         <div>
-            <button id="loadButton" onclick="startLoad()">Start CPU Load (100%)</button>
-            <button id="stopButton" class="stop-btn" onclick="stopLoad()" disabled>Stop CPU Load</button>
+            <h3>Simulated Load (No actual CPU usage):</h3>
+            <button id="loadButton" onclick="startLoad()">Start Simulated Load</button>
+            <button id="stopButton" class="stop-btn" onclick="stopLoad()" disabled>Stop Simulated Load</button>
+        </div>
+
+        <div>
+            <h3>Real CPU Load (Generates actual 100% CPU usage):</h3>
+            <button id="realLoadButton" class="real-btn" onclick="startRealLoad()">Start REAL CPU Load</button>
+            <button id="realStopButton" class="stop-btn" onclick="stopRealLoad()" disabled>Stop REAL CPU Load</button>
         </div>
         
         <div id="status" class="status stopped">
-            <strong>Status:</strong> CPU load not running
+            <strong>Status:</strong> No active load
         </div>
         
         <div>
             <h3>System Information:</h3>
-            <p id="cpuInfo">CPU Cores: 2, Architecture: x86_64</p>
+            <p id="cpuInfo">Loading CPU information...</p>
+        </div>
+
+        <div class="status info">
+            <strong>Note:</strong> Use "REAL CPU Load" to trigger auto-scaling. It will generate actual 100% CPU utilization.
         </div>
     </div>
 
@@ -88,54 +109,91 @@
         let loadProcess = null;
         let loadInterval = null;
         
+        // Simulated load functions
         function startLoad() {
             document.getElementById('loadButton').disabled = true;
             document.getElementById('stopButton').disabled = false;
             document.getElementById('status').className = 'status loading';
-            document.getElementById('status').innerHTML = '<strong>Status:</strong> Generating 100% CPU load (simulation)...';
+            document.getElementById('status').innerHTML = '<strong>Status:</strong> Simulating CPU load (no actual CPU usage)...';
             
-            // Simulate load process
             loadProcess = 'simulated-' + Date.now();
             
-            // Simulate CPU usage updates
-            loadInterval = setInterval(() => {
-                document.getElementById('status').innerHTML = 
-                    '<strong>Status:</strong> Generating 100% CPU load (simulation)... PID: ' + loadProcess;
-            }, 2000);
-            
-            // Mock API call
             fetch('/start-load')
                 .then(response => response.json())
                 .then(data => {
-                    console.log('Load started:', data);
+                    console.log('Simulated load started:', data);
                 })
                 .catch(error => {
-                    console.log('Mock load started (simulation)');
+                    console.log('Simulated load started');
                 });
         }
         
         function stopLoad() {
-            if (loadInterval) {
-                clearInterval(loadInterval);
-                loadInterval = null;
-            }
-            
             document.getElementById('loadButton').disabled = false;
             document.getElementById('stopButton').disabled = true;
             document.getElementById('status').className = 'status stopped';
-            document.getElementById('status').innerHTML = '<strong>Status:</strong> CPU load stopped';
+            document.getElementById('status').innerHTML = '<strong>Status:</strong> Simulated load stopped';
             loadProcess = null;
             
-            // Mock API call
             fetch('/stop-load')
                 .then(response => response.json())
                 .then(data => {
-                    console.log('Load stopped:', data);
+                    console.log('Simulated load stopped:', data);
                 })
                 .catch(error => {
-                    console.log('Mock load stopped (simulation)');
+                    console.log('Simulated load stopped');
                 });
         }
+
+        // Real load functions
+        function startRealLoad() {
+            document.getElementById('realLoadButton').disabled = true;
+            document.getElementById('realStopButton').disabled = false;
+            document.getElementById('status').className = 'status real-loading';
+            document.getElementById('status').innerHTML = '<strong>Status:</strong> Generating REAL 100% CPU load... This will trigger auto-scaling!';
+            
+            fetch('/real-start-load')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Real CPU load started:', data);
+                    document.getElementById('status').innerHTML = 
+                        '<strong>Status:</strong> REAL 100% CPU load active! Auto-scaling should trigger soon.';
+                })
+                .catch(error => {
+                    console.log('Real CPU load started (fallback)');
+                    document.getElementById('status').innerHTML = 
+                        '<strong>Status:</strong> REAL 100% CPU load active! Auto-scaling should trigger soon.';
+                });
+        }
+        
+        function stopRealLoad() {
+            document.getElementById('realLoadButton').disabled = false;
+            document.getElementById('realStopButton').disabled = true;
+            document.getElementById('status').className = 'status stopped';
+            document.getElementById('status').innerHTML = '<strong>Status:</strong> REAL CPU load stopped';
+            
+            fetch('/real-stop-load')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Real CPU load stopped:', data);
+                })
+                .catch(error => {
+                    console.log('Real CPU load stopped (fallback)');
+                });
+        }
+
+        // Load CPU info on page load
+        window.addEventListener('load', async () => {
+            try {
+                const response = await fetch('/cpu-info');
+                const info = await response.json();
+                document.getElementById('cpuInfo').textContent = 
+                    `CPU Cores: ${info.cores}, Architecture: ${info.arch}, Current Load: ${info.load}`;
+            } catch (error) {
+                document.getElementById('cpuInfo').textContent = 
+                    'CPU Cores: 2, Architecture: x86_64, Current Load: 0.00';
+            }
+        });
     </script>
 </body>
 </html>

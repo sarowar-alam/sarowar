@@ -1,10 +1,13 @@
 #!/bin/bash
 
-echo "Content-Type: application/json"
+# Start stress-ng to generate CPU load
+# Using all available CPU cores with matrix multiplication for maximum load
+stress-ng --cpu $(nproc) --cpu-method matrixprod --timeout 600s &
+
+# Store the PID
+echo $! > /tmp/cpu_load.pid
+
+# Return JSON response
+echo "Content-type: application/json"
 echo ""
-
-# Start stress-ng in background
-stress-ng --cpu 0 --cpu-method matrixprod --timeout 300s > /dev/null 2>&1 &
-PID=$!
-
-echo "{\"pid\":\"$PID\",\"status\":\"started\"}"
+echo "{\"status\": \"started\", \"pid\": \"$!\", \"cores\": \"$(nproc)\"}"

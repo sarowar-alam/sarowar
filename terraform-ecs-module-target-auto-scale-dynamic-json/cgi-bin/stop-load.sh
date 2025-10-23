@@ -1,9 +1,12 @@
 #!/bin/bash
 
-echo "Content-Type: application/json"
+# Stop stress-ng processes
+pkill -f stress-ng
+
+# Remove PID file
+rm -f /tmp/cpu_load.pid
+
+# Return JSON response
+echo "Content-type: application/json"
 echo ""
-
-# Stop all stress-ng processes
-pkill stress-ng
-
-echo "{\"status\":\"stopped\"}"
+echo "{\"status\": \"stopped\"}"

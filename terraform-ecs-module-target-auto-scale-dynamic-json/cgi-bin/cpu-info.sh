@@ -1,9 +1,11 @@
 #!/bin/bash
 
-echo "Content-Type: application/json"
+# Get CPU information
+CORES=$(nproc)
+ARCH=$(uname -m)
+LOAD=$(cat /proc/loadavg | cut -d' ' -f1)
+
+# Return JSON response
+echo "Content-type: application/json"
 echo ""
-
-CORES=$(nproc 2>/dev/null || echo "2")
-ARCH=$(uname -m 2>/dev/null || echo "x86_64")
-
-echo "{\"cores\":\"$CORES\",\"arch\":\"$ARCH\"}"
+echo "{\"cores\": \"$CORES\", \"arch\": \"$ARCH\", \"load\": \"$LOAD\"}"
