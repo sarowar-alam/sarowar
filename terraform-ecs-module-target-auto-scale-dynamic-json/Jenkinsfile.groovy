@@ -2,8 +2,8 @@ pipeline {
     agent any
     
     environment {
-        AWS_ACCOUNT_ID = 'your-aws-account-id'
-        AWS_REGION = 'us-east-1'
+        AWS_ACCOUNT_ID = '388779989543'
+        AWS_REGION = 'ap-south-1'
         ECR_REPO_NAME = 'cpu-load-test'
         PROJECT_NAME = 'cpu-load-test-app'
         TERRAFORM_DIR = 'terraform'
@@ -20,27 +20,29 @@ pipeline {
         stage('Checkout') {
             steps {
                 git branch: 'main',
-                    url: 'https://github.com/your-username/terraform-ecs-module-target-auto-scale-dynamic-json.git'
+                    url: 'https://github.com/sarowar-alam/sarowar.git'
             }
         }
         
-        stage('Configure AWS Credentials') {
-            steps {
-                script {
-                    withCredentials([
-                        string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
-                        string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
-                    ]) {
-                        sh """
-                            aws configure set aws_access_key_id ${AWS_ACCESS_KEY_ID}
-                            aws configure set aws_secret_access_key ${AWS_SECRET_ACCESS_KEY}
-                            aws configure set region ${AWS_REGION}
-                            aws configure set output json
-                        """
-                    }
+    stage('Configure AWS Credentials') {
+        steps {
+            script {
+                withCredentials([[
+                    $class: 'UsernamePasswordMultiBinding', 
+                    credentialsId: '78ddea82-7a14-4241-9da4-6cc5cbaf7c5b',
+                    usernameVariable: 'ACCESSKEY', 
+                    passwordVariable: 'SECRETKEY'
+                ]]) {
+                    sh """
+                        aws configure set aws_access_key_id ${ACCESSKEY}
+                        aws configure set aws_secret_access_key ${SECRETKEY}
+                        aws configure set region ${AWS_REGION}
+                        aws configure set output json
+                    """
                 }
             }
         }
+    }
         
         stage('Build Docker Image') {
             steps {
