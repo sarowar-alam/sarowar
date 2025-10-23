@@ -1,59 +1,53 @@
-﻿modules\ecs-service\cloudwatch.tf
-=================================
-resource "aws_cloudwatch_metric_alarm" "sqs_alarm_high" {
-  alarm_name          = "sqs-queue-depth-high-${var.ecs_service_name}"
+﻿modules\ecs-service\cloudwatch-cpu.tf
+=====================================
+# CPU-based Auto Scaling Policies
+resource "aws_cloudwatch_metric_alarm" "cpu_high" {
+  alarm_name          = "${var.ecs_service_name}-cpu-utilization-high"
   comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = 1
-  metric_name         = "ApproximateNumberOfMessagesVisible"
-  namespace           = "AWS/SQS"
+  evaluation_periods  = 2
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/ECS"
   period              = 60
   statistic           = "Average"
-  threshold           = var.threshold_num_messages
-  actions_enabled     = true
+  threshold           = 60
+  alarm_description   = "Scale out when CPU utilization exceeds 60%"
   alarm_actions       = [aws_appautoscaling_policy.scale_out.arn]
-  alarm_description   = "Scale out when SQS queue depth exceeds threshold"
 
   dimensions = {
-    QueueName = var.sqs_name
+    ClusterName = var.ecs_cluster_name
+    ServiceName = aws_ecs_service.this.name
   }
 
-  treat_missing_data = "notBreaching"
-
   tags = merge(var.common_tags, {
-    Name = "sqs-queue-depth-high-${var.ecs_service_name}"
+    Name = "${var.ecs_service_name}-cpu-high"
   })
-
-  depends_on = [aws_ecs_service.this]
 }
 
-resource "aws_cloudwatch_metric_alarm" "sqs_alarm_low" {
-  alarm_name          = "sqs-queue-depth-low-${var.ecs_service_name}"
-  comparison_operator = "LessThanOrEqualToThreshold"
-  evaluation_periods  = 1
-  metric_name         = "ApproximateNumberOfMessagesVisible"
-  namespace           = "AWS/SQS"
+resource "aws_cloudwatch_metric_alarm" "cpu_low" {
+  alarm_name          = "${var.ecs_service_name}-cpu-utilization-low"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 5
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/ECS"
   period              = 60
   statistic           = "Average"
-  threshold           = var.threshold_num_messages
-  actions_enabled     = true
+  threshold           = 30
+  alarm_description   = "Scale in when CPU utilization is below 30%"
   alarm_actions       = [aws_appautoscaling_policy.scale_in.arn]
-  alarm_description   = "Scale in when SQS queue depth is below threshold"
 
   dimensions = {
-    QueueName = var.sqs_name
+    ClusterName = var.ecs_cluster_name
+    ServiceName = aws_ecs_service.this.name
   }
 
-  treat_missing_data = "notBreaching"
-
   tags = merge(var.common_tags, {
-    Name = "sqs-queue-depth-low-${var.ecs_service_name}"
+    Name = "${var.ecs_service_name}-cpu-low"
   })
-
-  depends_on = [aws_ecs_service.this]
 }
 
+# Step Scaling Policies for CPU
 resource "aws_appautoscaling_policy" "scale_out" {
-  name               = "${var.ecs_service_name}-scale-out"
+  name               = "${var.ecs_service_name}-cpu-scale-out"
   policy_type        = "StepScaling"
   resource_id        = aws_appautoscaling_target.this.resource_id
   scalable_dimension = aws_appautoscaling_target.this.scalable_dimension
@@ -61,18 +55,30 @@ resource "aws_appautoscaling_policy" "scale_out" {
 
   step_scaling_policy_configuration {
     adjustment_type         = "ChangeInCapacity"
-    cooldown                = 300
+    cooldown                = 60
     metric_aggregation_type = "Average"
-    
+
     step_adjustment {
       metric_interval_lower_bound = 0
+      metric_interval_upper_bound = 10
       scaling_adjustment          = 1
+    }
+
+    step_adjustment {
+      metric_interval_lower_bound = 10
+      metric_interval_upper_bound = 20
+      scaling_adjustment          = 2
+    }
+
+    step_adjustment {
+      metric_interval_lower_bound = 20
+      scaling_adjustment          = 3
     }
   }
 }
 
 resource "aws_appautoscaling_policy" "scale_in" {
-  name               = "${var.ecs_service_name}-scale-in"
+  name               = "${var.ecs_service_name}-cpu-scale-in"
   policy_type        = "StepScaling"
   resource_id        = aws_appautoscaling_target.this.resource_id
   scalable_dimension = aws_appautoscaling_target.this.scalable_dimension
@@ -82,13 +88,36 @@ resource "aws_appautoscaling_policy" "scale_in" {
     adjustment_type         = "ChangeInCapacity"
     cooldown                = 300
     metric_aggregation_type = "Average"
-    
+
     step_adjustment {
       metric_interval_upper_bound = 0
       scaling_adjustment          = -1
     }
   }
 }
+
+# Additional CloudWatch Alarms for Monitoring
+resource "aws_cloudwatch_metric_alarm" "memory_high" {
+  alarm_name          = "${var.ecs_service_name}-memory-utilization-high"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "MemoryUtilization"
+  namespace           = "AWS/ECS"
+  period              = 60
+  statistic           = "Average"
+  threshold           = 80
+  alarm_description   = "Alarm when memory utilization exceeds 80%"
+
+  dimensions = {
+    ClusterName = var.ecs_cluster_name
+    ServiceName = aws_ecs_service.this.name
+  }
+
+  tags = merge(var.common_tags, {
+    Name = "${var.ecs_service_name}-memory-high"
+  })
+}
+
 
 
 modules\ecs-service\main.tf
@@ -101,15 +130,21 @@ resource "aws_ecs_service" "this" {
   desired_count                      = var.min_number_instances
   deployment_maximum_percent         = 200
   deployment_minimum_healthy_percent = 100
-  health_check_grace_period_seconds  = 0
+  health_check_grace_period_seconds  = var.health_check_grace_period
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.this.arn
+    container_name   = var.ecs_service_name
+    container_port   = var.container_port
+  }
 
   network_configuration {
-    security_groups = [var.sg_name]
-    subnets         = split(",", var.subnet_names)
+    security_groups  = [aws_security_group.ecs_service.id]
+    subnets          = var.subnet_ids
+    assign_public_ip = false
   }
 
   platform_version = "LATEST"
-  #launch_type      = "FARGATE"
 
   enable_execute_command = true
   scheduling_strategy    = "REPLICA"
@@ -121,8 +156,8 @@ resource "aws_ecs_service" "this" {
   }
 
   deployment_circuit_breaker {
-    enable   = false
-    rollback = false
+    enable   = true
+    rollback = true
   }
 
   deployment_controller {
@@ -136,26 +171,32 @@ resource "aws_ecs_service" "this" {
     Name = var.ecs_service_name
   })
 
-  depends_on = [aws_ecs_task_definition.this]
+  depends_on = [aws_lb_listener.https, aws_ecs_task_definition.this]
 }
 
 resource "aws_ecs_task_definition" "this" {
   family                   = var.ecs_service_name
   requires_compatibilities = ["FARGATE"]
   task_role_arn            = var.iam_task_role_arn
-  execution_role_arn       = "arn:aws:iam::YOUR_ACCOUNT_ID:role/ecsTaskExecutionRole"
+  execution_role_arn       = var.ecs_task_execution_role_arn
   network_mode             = "awsvpc"
   cpu                      = var.cpu_size
   memory                   = var.memory_size
 
   container_definitions = jsonencode([{
-    name  = var.ecs_service_name
-    image = var.image_uri
-    cpu   = 0
-    environmentFiles = [{
+    name   = var.ecs_service_name
+    image  = var.image_uri
+    cpu    = var.cpu_size
+    memory = var.memory_size
+    portMappings = [{
+      containerPort = var.container_port
+      hostPort      = var.container_port
+      protocol      = "tcp"
+    }]
+    environmentFiles = var.env_file != "" ? [{
       value = var.env_file
       type  = "s3"
-    }]
+    }] : []
     logConfiguration = {
       logDriver = "awslogs"
       options = {
@@ -164,7 +205,19 @@ resource "aws_ecs_task_definition" "this" {
         "awslogs-stream-prefix" = "ecs"
       }
     }
+    healthCheck = {
+      command     = ["CMD-SHELL", "curl -f http://localhost:${var.container_port}${var.health_check_path} || exit 1"]
+      interval    = 30
+      timeout     = 5
+      retries     = 3
+      startPeriod = 60
+    }
   }])
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "X86_64"
+  }
 
   ephemeral_storage {
     size_in_gib = var.ephemeral_size
@@ -172,6 +225,141 @@ resource "aws_ecs_task_definition" "this" {
 
   tags = merge(var.common_tags, {
     Name = var.ecs_service_name
+  })
+}
+
+# Load Balancer Resources
+resource "aws_lb" "this" {
+  name               = "${var.ecs_service_name}-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb.id]
+  subnets            = var.public_subnet_ids
+
+  enable_deletion_protection = false
+
+  tags = merge(var.common_tags, {
+    Name = "${var.ecs_service_name}-alb"
+  })
+}
+
+resource "aws_lb_target_group" "this" {
+  name        = "${var.ecs_service_name}-tg"
+  port        = var.container_port
+  protocol    = "HTTP"
+  vpc_id      = var.vpc_id
+  target_type = "ip"
+
+  health_check {
+    enabled             = true
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    timeout             = 5
+    interval            = 30
+    path                = var.health_check_path
+    port                = "traffic-port"
+    protocol            = "HTTP"
+    matcher             = "200-299"
+  }
+
+  tags = merge(var.common_tags, {
+    Name = "${var.ecs_service_name}-tg"
+  })
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_lb_listener" "https" {
+  load_balancer_arn = aws_lb.this.arn
+  port              = 443
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-2016-08"
+  certificate_arn   = var.acm_certificate_arn
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.this.arn
+  }
+
+  tags = merge(var.common_tags, {
+    Name = "${var.ecs_service_name}-https"
+  })
+}
+
+resource "aws_lb_listener" "http_redirect" {
+  load_balancer_arn = aws_lb.this.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type = "redirect"
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
+    }
+  }
+
+  tags = merge(var.common_tags, {
+    Name = "${var.ecs_service_name}-http-redirect"
+  })
+}
+
+# Security Groups
+resource "aws_security_group" "alb" {
+  name        = "${var.ecs_service_name}-alb-sg"
+  description = "Security group for ALB"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(var.common_tags, {
+    Name = "${var.ecs_service_name}-alb-sg"
+  })
+}
+
+resource "aws_security_group" "ecs_service" {
+  name        = "${var.ecs_service_name}-ecs-sg"
+  description = "Security group for ECS service"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    from_port       = var.container_port
+    to_port         = var.container_port
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(var.common_tags, {
+    Name = "${var.ecs_service_name}-ecs-sg"
   })
 }
 
@@ -193,6 +381,7 @@ resource "aws_appautoscaling_target" "this" {
 
   depends_on = [aws_ecs_service.this]
 }
+
 
 
 modules\ecs-service\outputs.tf
@@ -316,55 +505,71 @@ variable "common_tags" {
   description = "Common tags for all resources"
   default     = {}
 }
+variable "container_port" {
+  type        = number
+  description = "Container port to expose"
+  default     = 80
+}
+
+variable "health_check_path" {
+  type        = string
+  description = "Health check path for the application"
+  default     = "/"
+}
+
+variable "health_check_grace_period" {
+  type        = number
+  description = "Health check grace period in seconds"
+  default     = 60
+}
+
+variable "vpc_id" {
+  type        = string
+  description = "VPC ID"
+}
+
+variable "public_subnet_ids" {
+  type        = list(string)
+  description = "List of public subnet IDs for ALB"
+}
+
+variable "subnet_ids" {
+  type        = list(string)
+  description = "List of private subnet IDs for ECS tasks"
+}
+
+variable "acm_certificate_arn" {
+  type        = string
+  description = "ACM certificate ARN for HTTPS"
+}
+
+variable "ecs_task_execution_role_arn" {
+  type        = string
+  description = "ECS task execution role ARN"
+}
+
 
 
 ecs-services.json
 =================
 {
-  "services": [
-    {
-      "ecs_name": "your-ecs-service-name-01",
-      "cpu": 256,
-      "memory": 1024,
-      "disk_size": 21,
-      "min_instances": 1,
-      "max_instances": 5,
-      "threshold": 100,
-      "sqs": "service-01-sqs-name",
-      "env": "arn:aws:s3:::bucket-name-store-env/your_environment_name/your-ecs-service-name-01/your-ecs-service-name-01.env", 
-      "cluster": "your_environment_name-fargate-container-cluster", 
-      "environment": "rc",
-      "docker_file_path": "your-ecs-service-name-01.Service"
-    },
-    {
-      "ecs_name": "your-ecs-service-name-02",
-      "cpu": 256,
-      "memory": 1024,
-      "disk_size": 21,
-      "min_instances": 1,
-      "max_instances": 5,
-      "threshold": 100,
-      "sqs": "service-02-sqs-name",
-      "env": "arn:aws:s3:::bucket-name-store-env/your_environment_name/your-ecs-service-name-02/your-ecs-service-name-02.env", 
-      "cluster": "your_environment_name-fargate-container-cluster", 
-      "environment": "rc",
-      "docker_file_path": "your-ecs-service-name-02.Service"
-    },
-    {
-      "ecs_name": "your-ecs-service-name-03",
-      "cpu": 256,
-      "memory": 1024,
-      "disk_size": 21,
-      "min_instances": 1,
-      "max_instances": 5,
-      "threshold": 100,
-      "sqs": "service-03-sqs-name",
-      "env": "arn:aws:s3:::bucket-name-store-env/your_environment_name/your-ecs-service-name-03/your-ecs-service-name-03.env", 
-      "cluster": "your_environment_name-fargate-container-cluster", 
-      "environment": "rc",
-      "docker_file_path": "your-ecs-service-name-03.Service"
-    }
-  ]
+    "services": [
+        {
+            "ecs_name": "web-app-01",
+            "cpu": 512,
+            "memory": 1024,
+            "disk_size": 21,
+            "min_instances": 2,
+            "max_instances": 10,
+            "container_port": 80,
+            "health_check_path": "/health",
+            "health_check_grace_period": 60,
+            "env": "arn:aws:s3:::bucket-name-store-env/rc/web-app-01/web-app-01.env",
+            "cluster": "your-environment-fargate-container-cluster",
+            "environment": "rc",
+            "docker_file_path": "."
+        }
+    ]
 }
 
 
@@ -599,6 +804,45 @@ variable "cost_app" {
   type        = string
   description = "Cost application tag"
 }
+
+variable "container_port" {
+  type        = number
+  description = "Container port to expose"
+  default     = 80
+}
+
+variable "health_check_path" {
+  type        = string
+  description = "Health check path for the application"
+  default     = "/"
+}
+
+variable "vpc_id" {
+  type        = string
+  description = "VPC ID"
+}
+
+variable "public_subnet_ids" {
+  type        = list(string)
+  description = "List of public subnet IDs for ALB"
+}
+
+variable "private_subnet_ids" {
+  type        = list(string)
+  description = "List of private subnet IDs for ECS tasks"
+}
+
+variable "acm_certificate_arn" {
+  type        = string
+  description = "ACM certificate ARN for HTTPS"
+}
+
+variable "ecs_task_execution_role_arn" {
+  type        = string
+  description = "ECS task execution role ARN"
+  default     = "arn:aws:iam::YOUR_ACCOUNT_ID:role/ecsTaskExecutionRole"
+}
+
 
 
 your-environment-rc-services.gvy
