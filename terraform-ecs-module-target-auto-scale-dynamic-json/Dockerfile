@@ -1,24 +1,14 @@
-# Use official NGINX as base image
 FROM nginx:alpine
 
-# Install curl for health checks
-RUN apk add --no-cache curl
+# Install stress-ng for CPU load testing
+RUN apk add --no-cache stress-ng
 
-# Copy custom NGINX configuration
+# Copy custom HTML and configuration
+COPY index.html /usr/share/nginx/html/
 COPY nginx.conf /etc/nginx/nginx.conf
-
-# Copy website files
-COPY src/ /usr/share/nginx/html/
-
-# Create health check file
-RUN echo "healthy" > /usr/share/nginx/html/health
 
 # Expose port 80
 EXPOSE 80
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost/health || exit 1
-
-# Start NGINX
+# Start nginx
 CMD ["nginx", "-g", "daemon off;"]

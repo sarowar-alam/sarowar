@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CPU Load Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .stop-btn {
+            background-color: #dc3545;
+        }
+        .stop-btn:hover {
+            background-color: #c82333;
+        }
+        .status {
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 4px;
+        }
+        .loading {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+        }
+        .stopped {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>CPU Load Test Application</h1>
+        <p>Click the button below to generate CPU load (100% utilization)</p>
+        
+        <div>
+            <button id="loadButton" onclick="startLoad()">Start CPU Load (100%)</button>
+            <button id="stopButton" class="stop-btn" onclick="stopLoad()" disabled>Stop CPU Load</button>
+        </div>
+        
+        <div id="status" class="status stopped">
+            <strong>Status:</strong> CPU load not running
+        </div>
+        
+        <div>
+            <h3>System Information:</h3>
+            <p id="cpuInfo">Loading CPU information...</p>
+        </div>
+    </div>
+
+    <script>
+        let loadProcess = null;
+        
+        async function startLoad() {
+            try {
+                document.getElementById('loadButton').disabled = true;
+                document.getElementById('stopButton').disabled = false;
+                document.getElementById('status').className = 'status loading';
+                document.getElementById('status').innerHTML = '<strong>Status:</strong> Generating 100% CPU load...';
+                
+                const response = await fetch('/start-load', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    document.getElementById('status').innerHTML = 
+                        '<strong>Status:</strong> CPU load running (PID: ' + result.pid + ')';
+                    loadProcess = result.pid;
+                } else {
+                    throw new Error(result.error || 'Failed to start load');
+                }
+            } catch (error) {
+                alert('Error starting CPU load: ' + error.message);
+                stopLoad();
+            }
+        }
+        
+        async function stopLoad() {
+            try {
+                if (loadProcess) {
+                    await fetch('/stop-load', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ pid: loadProcess })
+                    });
+                }
+            } catch (error) {
+                console.error('Error stopping load:', error);
+            } finally {
+                document.getElementById('loadButton').disabled = false;
+                document.getElementById('stopButton').disabled = true;
+                document.getElementById('status').className = 'status stopped';
+                document.getElementById('status').innerHTML = '<strong>Status:</strong> CPU load stopped';
+                loadProcess = null;
+            }
+        }
+        
+        // Load CPU info on page load
+        window.addEventListener('load', async () => {
+            try {
+                const response = await fetch('/cpu-info');
+                const info = await response.json();
+                document.getElementById('cpuInfo').textContent = 
+                    `CPU Cores: ${info.cores}, Architecture: ${info.arch}`;
+            } catch (error) {
+                document.getElementById('cpuInfo').textContent = 
+                    'Unable to load CPU information';
+            }
+        });
+    </script>
+</body>
+</html>
