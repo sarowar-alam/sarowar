@@ -45,9 +45,8 @@ pipeline {
         
         stage('Build Docker Image') {
             steps {
-                dir(env.DOCKER_DIR) {
-                    script {
-                        cd (env.SOURCE_DIRECTORY)
+                script {
+                    dir(env.SOURCE_DIRECTORY) {
                         docker.build("${ECR_REPO_NAME}:${BUILD_ID}")
                     }
                 }
@@ -83,7 +82,7 @@ pipeline {
         
         stage('Terraform Init') {
             steps {
-                dir(env.TERRAFORM_DIR) {
+                dir("${env.SOURCE_DIRECTORY}/${env.TERRAFORM_DIR}") {
                     sh 'terraform init'
                 }
             }
@@ -91,7 +90,7 @@ pipeline {
         
         stage('Terraform Plan') {
             steps {
-                dir(env.TERRAFORM_DIR) {
+                dir("${env.SOURCE_DIRECTORY}/${env.TERRAFORM_DIR}") {
                     sh """
                         terraform plan \
                           -var="aws_region=${AWS_REGION}" \
@@ -109,7 +108,7 @@ pipeline {
         
         stage('Terraform Apply/Destroy') {
             steps {
-                dir(env.TERRAFORM_DIR) {
+                dir("${env.SOURCE_DIRECTORY}/${env.TERRAFORM_DIR}") {
                     script {
                         if (params.TERRAFORM_ACTION == 'apply') {
                             sh 'terraform apply -auto-approve tfplan'
@@ -136,7 +135,7 @@ pipeline {
                 expression { params.TERRAFORM_ACTION == 'apply' }
             }
             steps {
-                dir(env.TERRAFORM_DIR) {
+                dir("${env.SOURCE_DIRECTORY}/${env.TERRAFORM_DIR}") {
                     script {
                         def albDns = sh(
                             script: 'terraform output -raw alb_dns_name',
@@ -145,6 +144,20 @@ pipeline {
                         
                         echo "Application Load Balancer URL: http://${albDns}"
                         env.ALB_URL = "http://${albDns}"
+                        
+                        // Also get other useful outputs
+                        def clusterName = sh(
+                            script: 'terraform output -raw ecs_cluster_name',
+                            returnStdout: true
+                        ).trim()
+                        
+                        def serviceName = sh(
+                            script: 'terraform output -raw ecs_service_name',
+                            returnStdout: true
+                        ).trim()
+                        
+                        echo "ECS Cluster: ${clusterName}"
+                        echo "ECS Service: ${serviceName}"
                     }
                 }
             }
@@ -157,14 +170,23 @@ pipeline {
                 // Clean up Docker images
                 sh "docker rmi ${ECR_REPO_NAME}:${BUILD_ID} || true"
                 sh "docker rmi ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:${BUILD_ID} || true"
+                sh "docker rmi ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:latest || true"
             }
         }
         success {
             script {
                 if (params.TERRAFORM_ACTION == 'apply' && env.ALB_URL) {
-                    echo "Deployment successful! Access your application at: ${env.ALB_URL}"
+                    echo "🎉 Deployment successful!"
+                    echo "🌐 Access your application at: ${env.ALB_URL}"
+                    echo "💻 Test CPU load by clicking 'Start CPU Load' button"
+                    echo "📈 Auto-scaling will scale to 3 tasks when CPU > 50%"
+                } else if (params.TERRAFORM_ACTION == 'destroy') {
+                    echo "🧹 Infrastructure destroyed successfully"
                 }
             }
+        }
+        failure {
+            echo "❌ Pipeline failed - check the logs above for details"
         }
     }
 }
