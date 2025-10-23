@@ -6,6 +6,7 @@ pipeline {
         AWS_REGION = 'us-east-1'
         ECR_REPO_NAME = 'cpu-load-test'
         PROJECT_NAME = 'cpu-load-test-app'
+        SOURCE_DIRECTORY = 'terraform-ecs-module-target-auto-scale-dynamic-json'
         TERRAFORM_DIR = 'terraform'
         DOCKER_DIR = '.'
     }
@@ -46,6 +47,7 @@ pipeline {
             steps {
                 dir(env.DOCKER_DIR) {
                     script {
+                        cd (env.SOURCE_DIRECTORY)
                         docker.build("${ECR_REPO_NAME}:${BUILD_ID}")
                     }
                 }
