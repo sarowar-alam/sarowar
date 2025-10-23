@@ -47,7 +47,7 @@ pipeline {
             steps {
                 script {
                     dir(env.SOURCE_DIRECTORY) {
-                        docker.build("${ECR_REPO_NAME}:${BUILD_ID}")
+                        sh "docker build -t ${ECR_REPO_NAME}:${BUILD_ID} ."
                     }
                 }
             }
@@ -144,20 +144,6 @@ pipeline {
                         
                         echo "Application Load Balancer URL: http://${albDns}"
                         env.ALB_URL = "http://${albDns}"
-                        
-                        // Also get other useful outputs
-                        def clusterName = sh(
-                            script: 'terraform output -raw ecs_cluster_name',
-                            returnStdout: true
-                        ).trim()
-                        
-                        def serviceName = sh(
-                            script: 'terraform output -raw ecs_service_name',
-                            returnStdout: true
-                        ).trim()
-                        
-                        echo "ECS Cluster: ${clusterName}"
-                        echo "ECS Service: ${serviceName}"
                     }
                 }
             }
