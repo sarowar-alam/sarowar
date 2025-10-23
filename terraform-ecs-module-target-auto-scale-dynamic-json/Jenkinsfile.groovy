@@ -3,7 +3,7 @@ pipeline {
     
     environment {
         AWS_ACCOUNT_ID = '388779989543'
-        AWS_REGION = 'ap-south-1'
+        AWS_REGION = 'us-east-1'
         ECR_REPO_NAME = 'cpu-load-test'
         PROJECT_NAME = 'cpu-load-test-app'
         TERRAFORM_DIR = 'terraform'
@@ -11,8 +11,6 @@ pipeline {
     }
     
     parameters {
-        string(name: 'AWS_ACCESS_KEY_ID', defaultValue: '', description: 'AWS Access Key ID')
-        string(name: 'AWS_SECRET_ACCESS_KEY', defaultValue: '', description: 'AWS Secret Access Key')
         choice(name: 'TERRAFORM_ACTION', choices: ['apply', 'destroy'], description: 'Terraform action to perform')
     }
     
@@ -24,25 +22,25 @@ pipeline {
             }
         }
         
-    stage('Configure AWS Credentials') {
-        steps {
-            script {
-                withCredentials([[
-                    $class: 'UsernamePasswordMultiBinding', 
-                    credentialsId: '78ddea82-7a14-4241-9da4-6cc5cbaf7c5b',
-                    usernameVariable: 'ACCESSKEY', 
-                    passwordVariable: 'SECRETKEY'
-                ]]) {
-                    sh """
-                        aws configure set aws_access_key_id ${ACCESSKEY}
-                        aws configure set aws_secret_access_key ${SECRETKEY}
-                        aws configure set region ${AWS_REGION}
-                        aws configure set output json
-                    """
+        stage('Configure AWS Credentials') {
+            steps {
+                script {
+                    withCredentials([[
+                        $class: 'UsernamePasswordMultiBinding', 
+                        credentialsId: '78ddea82-7a14-4241-9da4-6cc5cbaf7c5b',
+                        usernameVariable: 'ACCESSKEY', 
+                        passwordVariable: 'SECRETKEY'
+                    ]]) {
+                        sh """
+                            aws configure set aws_access_key_id ${ACCESSKEY}
+                            aws configure set aws_secret_access_key ${SECRETKEY}
+                            aws configure set region ${AWS_REGION}
+                            aws configure set output json
+                        """
+                    }
                 }
             }
         }
-    }
         
         stage('Build Docker Image') {
             steps {
