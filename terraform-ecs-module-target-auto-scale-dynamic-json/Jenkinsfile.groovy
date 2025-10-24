@@ -5,7 +5,7 @@ pipeline {
         AWS_ACCOUNT_ID = '388779989543'
         AWS_REGION = 'ap-south-1'
         ECR_REPO_NAME = 'cpu-load-test'
-        PROJECT_NAME = 'cpu-load-test-app'
+        PROJECT_NAME = 'cpu-load-test-app-02'
         SOURCE_DIRECTORY = 'terraform-ecs-module-target-auto-scale-dynamic-json'
         TERRAFORM_DIR = 'terraform'
         DOCKER_DIR = '.'
@@ -186,29 +186,32 @@ pipeline {
                 // Clean up dangling images
                 sh "docker image prune -f || true"
 
-                    try {
-                        // Check if the workspace directory exists
-                        if (fileExists(env.WORKSPACE)) {
-                            echo "Cleaning up workspace: ${env.WORKSPACE}"
+                try {
+                    // Check if the workspace directory exists
+                    if (fileExists(env.WORKSPACE)) {
+                        echo "Cleaning up workspace: ${env.WORKSPACE}"
 
-                            // First approach: Delete all files and directories in the workspace
-                            deleteDir()
+                        // First approach: Delete all files and directories in the workspace
+                        deleteDir()
 
-                            // Second approach: Use cleanWs for more advanced cleanup with patterns
-                            cleanWs(cleanWhenNotBuilt: false,
-                                    deleteDirs: true,
-                                    disableDeferredWipeout: true,
-                                    notFailBuild: true,
-                                    patterns: [[pattern: '.gitignore', type: 'INCLUDE'],
-                                            [pattern: '.propsfile', type: 'EXCLUDE']])
-                        } else {
-                            echo "Workspace directory does not exist or already cleaned."
-                        }
-                    } catch (Exception e) {
-                        // Log the error but do not fail the build
-                        echo "Error during workspace cleanup: ${e.message}"
+                        // Second approach: Use cleanWs for more advanced cleanup with patterns
+                        cleanWs(cleanWhenNotBuilt: false,
+                                deleteDirs: true,
+                                disableDeferredWipeout: true,
+                                notFailBuild: true,
+                                patterns: [[pattern: '.gitignore', type: 'INCLUDE'],
+                                        [pattern: '.propsfile', type: 'EXCLUDE'],
+                                        [pattern: '**/*.tfstate', type: 'EXCLUDE'],
+                                        [pattern: '**/*.tfstate.*', type: 'EXCLUDE'],
+                                        [pattern: '**/.terraform/', type: 'EXCLUDE']])
+                    } else {
+                        echo "Workspace directory does not exist or already cleaned."
                     }
-                                    
+                } catch (Exception e) {
+                    // Log the error but do not fail the build
+                    echo "Error during workspace cleanup: ${e.message}"
+                }
+
             }
         }
         success {
