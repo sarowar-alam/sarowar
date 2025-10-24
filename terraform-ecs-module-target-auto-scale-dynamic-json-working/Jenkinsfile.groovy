@@ -178,36 +178,36 @@ pipeline {
     post {
         always {
             script {
-                // Clean up Docker images
-                sh "docker rmi ${ECR_REPO_NAME}:${BUILD_ID} || true"
-                sh "docker rmi ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:${BUILD_ID} || true"
-                sh "docker rmi ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:latest || true"
+                // // Clean up Docker images
+                // sh "docker rmi ${ECR_REPO_NAME}:${BUILD_ID} || true"
+                // sh "docker rmi ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:${BUILD_ID} || true"
+                // sh "docker rmi ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:latest || true"
                 
-                // Clean up dangling images
-                sh "docker image prune -f || true"
+                // // Clean up dangling images
+                // sh "docker image prune -f || true"
 
-                    try {
-                        // Check if the workspace directory exists
-                        if (fileExists(env.WORKSPACE)) {
-                            echo "Cleaning up workspace: ${env.WORKSPACE}"
+                //     try {
+                //         // Check if the workspace directory exists
+                //         if (fileExists(env.WORKSPACE)) {
+                //             echo "Cleaning up workspace: ${env.WORKSPACE}"
 
-                            // First approach: Delete all files and directories in the workspace
-                            deleteDir()
+                //             // First approach: Delete all files and directories in the workspace
+                //             deleteDir()
 
-                            // Second approach: Use cleanWs for more advanced cleanup with patterns
-                            cleanWs(cleanWhenNotBuilt: false,
-                                    deleteDirs: true,
-                                    disableDeferredWipeout: true,
-                                    notFailBuild: true,
-                                    patterns: [[pattern: '.gitignore', type: 'INCLUDE'],
-                                            [pattern: '.propsfile', type: 'EXCLUDE']])
-                        } else {
-                            echo "Workspace directory does not exist or already cleaned."
-                        }
-                    } catch (Exception e) {
-                        // Log the error but do not fail the build
-                        echo "Error during workspace cleanup: ${e.message}"
-                    }
+                //             // Second approach: Use cleanWs for more advanced cleanup with patterns
+                //             cleanWs(cleanWhenNotBuilt: false,
+                //                     deleteDirs: true,
+                //                     disableDeferredWipeout: true,
+                //                     notFailBuild: true,
+                //                     patterns: [[pattern: '.gitignore', type: 'INCLUDE'],
+                //                             [pattern: '.propsfile', type: 'EXCLUDE']])
+                //         } else {
+                //             echo "Workspace directory does not exist or already cleaned."
+                //         }
+                //     } catch (Exception e) {
+                //         // Log the error but do not fail the build
+                //         echo "Error during workspace cleanup: ${e.message}"
+                //     }
                                     
             }
         }
