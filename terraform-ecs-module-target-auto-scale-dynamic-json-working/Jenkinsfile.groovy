@@ -5,7 +5,7 @@ pipeline {
         AWS_ACCOUNT_ID = '388779989543'
         AWS_REGION = 'ap-south-1'
         ECR_REPO_NAME = 'cpu-load-test'
-        PROJECT_NAME = 'cpu-load-test-app-04'
+        PROJECT_NAME = 'cpu-load-test-app-05'
         SOURCE_DIRECTORY = 'terraform-ecs-module-target-auto-scale-dynamic-json-working'
         TERRAFORM_DIR = 'terraform'
         DOCKER_DIR = '.'
@@ -28,7 +28,7 @@ pipeline {
                 script {
                     withCredentials([[
                         $class: 'UsernamePasswordMultiBinding', 
-                        credentialsId: '78ddea82-7a14-4241-9da4-6cc5cbaf7c5b',
+                        credentialsId: '1bea5c28-13d4-4902-9373-38e3f1832132',
                         usernameVariable: 'ACCESSKEY', 
                         passwordVariable: 'SECRETKEY'
                     ]]) {
