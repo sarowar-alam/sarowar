@@ -62,10 +62,10 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-# Security Group
-resource "aws_security_group" "ecs" {
-  name        = "${var.project_name}-ecs-sg"
-  description = "Security group for ECS service"
+# Security Group for ALB
+resource "aws_security_group" "alb" {
+  name        = "${var.project_name}-alb-sg"
+  description = "Security group for Application Load Balancer"
   vpc_id      = aws_vpc.main.id
 
   ingress {
@@ -73,6 +73,31 @@ resource "aws_security_group" "ecs" {
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${var.project_name}-alb-sg"
+  }
+}
+
+# Security Group for ECS
+resource "aws_security_group" "ecs" {
+  name        = "${var.project_name}-ecs-sg"
+  description = "Security group for ECS service"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port       = 80
+    to_port         = 80
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
   }
 
   egress {
@@ -128,6 +153,16 @@ resource "aws_ecs_task_definition" "main" {
         "awslogs-stream-prefix" = "ecs"
       }
     }
+    environment = [
+      {
+        name  = "NGINX_HOST"
+        value = "localhost"
+      },
+      {
+        name  = "NGINX_PORT"
+        value = "80"
+      }
+    ]
   }])
 
   tags = {
@@ -139,8 +174,8 @@ resource "aws_ecs_task_definition" "main" {
 resource "aws_lb" "main" {
   name               = "${var.project_name}-alb"
   internal           = false
-  load_balancer_type = "application" # FIXED: Changed from "loadbalancer" to "application"
-  security_groups    = [aws_security_group.ecs.id]
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb.id]
   subnets            = aws_subnet.public[*].id
 
   enable_deletion_protection = false
@@ -159,10 +194,11 @@ resource "aws_lb_target_group" "main" {
   target_type = "ip"
 
   health_check {
+    enabled             = true
     healthy_threshold   = 2
     unhealthy_threshold = 2
-    timeout             = 3
-    path                = "/"
+    timeout             = 5
+    path                = "/health.html"
     protocol            = "HTTP"
     interval            = 30
     matcher             = "200"
@@ -182,6 +218,10 @@ resource "aws_lb_listener" "main" {
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.main.arn
+  }
+
+  tags = {
+    Name = "${var.project_name}-listener"
   }
 }
 
@@ -254,6 +294,10 @@ resource "aws_iam_role" "ecs_task_execution_role" {
       }
     ]
   })
+
+  tags = {
+    Name = "${var.project_name}-ecs-task-execution-role"
+  }
 }
 
 resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_policy" {
@@ -276,6 +320,10 @@ resource "aws_iam_role" "ecs_task_role" {
       }
     ]
   })
+
+  tags = {
+    Name = "${var.project_name}-ecs-task-role"
+  }
 }
 
 # CloudWatch Log Group
@@ -302,4 +350,9 @@ output "ecs_cluster_name" {
 output "ecs_service_name" {
   description = "Name of the ECS service"
   value       = aws_ecs_service.main.name
+}
+
+output "target_group_arn" {
+  description = "ARN of the target group"
+  value       = aws_lb_target_group.main.arn
 }

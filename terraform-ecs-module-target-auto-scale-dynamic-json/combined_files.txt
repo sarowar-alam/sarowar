@@ -1,0 +1,937 @@
+﻿scripts\cpu-info.sh
+===================
+#!/bin/bash
+
+# Get CPU information
+CORES=$(nproc)
+ARCH=$(uname -m)
+LOAD=$(cat /proc/loadavg | cut -d' ' -f1)
+
+# Return JSON response
+echo "Content-type: application/json"
+echo ""
+echo "{\"cores\": \"$CORES\", \"arch\": \"$ARCH\", \"load\": \"$LOAD\"}"
+
+
+scripts\start-load.sh
+=====================
+#!/bin/bash
+
+# Start stress-ng to generate CPU load
+# Using all available CPU cores with matrix multiplication for maximum load
+stress-ng --cpu $(nproc) --cpu-method matrixprod --timeout 600s &
+
+# Store the PID
+echo $! > /tmp/cpu_load.pid
+
+# Return JSON response
+echo "Content-type: application/json"
+echo ""
+echo "{\"status\": \"started\", \"pid\": \"$!\", \"cores\": \"$(nproc)\"}"
+
+
+scripts\stop-load.sh
+====================
+#!/bin/bash
+
+# Stop stress-ng processes
+pkill -f stress-ng
+
+# Remove PID file
+rm -f /tmp/cpu_load.pid
+
+# Return JSON response
+echo "Content-type: application/json"
+echo ""
+echo "{\"status\": \"stopped\"}"
+
+
+terraform\main.tf
+=================
+terraform {
+  required_version = ">= 1.0"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+# VPC
+resource "aws_vpc" "main" {
+  cidr_block           = var.vpc_cidr
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+
+  tags = {
+    Name = "${var.project_name}-vpc"
+  }
+}
+
+# Internet Gateway
+resource "aws_internet_gateway" "main" {
+  vpc_id = aws_vpc.main.id
+
+  tags = {
+    Name = "${var.project_name}-igw"
+  }
+}
+
+# Public Subnets
+resource "aws_subnet" "public" {
+  count                   = length(var.availability_zones)
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = cidrsubnet(var.vpc_cidr, 8, count.index)
+  availability_zone       = var.availability_zones[count.index]
+  map_public_ip_on_launch = true
+
+  tags = {
+    Name = "${var.project_name}-public-subnet-${count.index + 1}"
+  }
+}
+
+# Route Table
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.main.id
+  }
+
+  tags = {
+    Name = "${var.project_name}-public-rt"
+  }
+}
+
+# Route Table Associations
+resource "aws_route_table_association" "public" {
+  count          = length(aws_subnet.public)
+  subnet_id      = aws_subnet.public[count.index].id
+  route_table_id = aws_route_table.public.id
+}
+
+# Security Group
+resource "aws_security_group" "ecs" {
+  name        = "${var.project_name}-ecs-sg"
+  description = "Security group for ECS service"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${var.project_name}-ecs-sg"
+  }
+}
+
+# ECS Cluster
+resource "aws_ecs_cluster" "main" {
+  name = "${var.project_name}-cluster"
+
+  setting {
+    name  = "containerInsights"
+    value = "enabled"
+  }
+
+  tags = {
+    Name = "${var.project_name}-cluster"
+  }
+}
+
+# ECS Task Definition
+resource "aws_ecs_task_definition" "main" {
+  family                   = "${var.project_name}-task"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = var.task_cpu
+  memory                   = var.task_memory
+  execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
+  task_role_arn            = aws_iam_role.ecs_task_role.arn
+
+  container_definitions = jsonencode([{
+    name      = var.container_name
+    image     = var.ecr_image_url
+    essential = true
+    portMappings = [{
+      containerPort = 80
+      hostPort      = 80
+      protocol      = "tcp"
+    }]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        "awslogs-group"         = aws_cloudwatch_log_group.ecs.name
+        "awslogs-region"        = var.aws_region
+        "awslogs-stream-prefix" = "ecs"
+      }
+    }
+  }])
+
+  tags = {
+    Name = "${var.project_name}-task-definition"
+  }
+}
+
+# Application Load Balancer
+resource "aws_lb" "main" {
+  name               = "${var.project_name}-alb"
+  internal           = false
+  load_balancer_type = "application" # FIXED: Changed from "loadbalancer" to "application"
+  security_groups    = [aws_security_group.ecs.id]
+  subnets            = aws_subnet.public[*].id
+
+  enable_deletion_protection = false
+
+  tags = {
+    Name = "${var.project_name}-alb"
+  }
+}
+
+# Target Group
+resource "aws_lb_target_group" "main" {
+  name        = "${var.project_name}-tg"
+  port        = 80
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.main.id
+  target_type = "ip"
+
+  health_check {
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    timeout             = 3
+    path                = "/"
+    protocol            = "HTTP"
+    interval            = 30
+    matcher             = "200"
+  }
+
+  tags = {
+    Name = "${var.project_name}-target-group"
+  }
+}
+
+# ALB Listener
+resource "aws_lb_listener" "main" {
+  load_balancer_arn = aws_lb.main.arn
+  port              = "80"
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.main.arn
+  }
+}
+
+# ECS Service
+resource "aws_ecs_service" "main" {
+  name            = "${var.project_name}-service"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.main.arn
+  desired_count   = var.desired_count
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    security_groups  = [aws_security_group.ecs.id]
+    subnets          = aws_subnet.public[*].id
+    assign_public_ip = true
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.main.arn
+    container_name   = var.container_name
+    container_port   = 80
+  }
+
+  depends_on = [aws_lb_listener.main]
+
+  tags = {
+    Name = "${var.project_name}-service"
+  }
+}
+
+# Auto Scaling Policy
+resource "aws_appautoscaling_target" "ecs_target" {
+  max_capacity       = 3
+  min_capacity       = 1
+  resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.main.name}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  service_namespace  = "ecs"
+}
+
+resource "aws_appautoscaling_policy" "cpu_scaling" {
+  name               = "${var.project_name}-cpu-scaling"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.ecs_target.resource_id
+  scalable_dimension = aws_appautoscaling_target.ecs_target.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.ecs_target.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageCPUUtilization"
+    }
+    target_value       = 50.0
+    scale_in_cooldown  = 60
+    scale_out_cooldown = 60
+  }
+}
+
+# IAM Roles
+resource "aws_iam_role" "ecs_task_execution_role" {
+  name = "${var.project_name}-ecs-task-execution-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_policy" {
+  role       = aws_iam_role.ecs_task_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+resource "aws_iam_role" "ecs_task_role" {
+  name = "${var.project_name}-ecs-task-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+# CloudWatch Log Group
+resource "aws_cloudwatch_log_group" "ecs" {
+  name              = "/ecs/${var.project_name}"
+  retention_in_days = 14
+
+  tags = {
+    Name = "${var.project_name}-log-group"
+  }
+}
+
+# Outputs
+output "alb_dns_name" {
+  description = "DNS name of the Application Load Balancer"
+  value       = aws_lb.main.dns_name
+}
+
+output "ecs_cluster_name" {
+  description = "Name of the ECS cluster"
+  value       = aws_ecs_cluster.main.name
+}
+
+output "ecs_service_name" {
+  description = "Name of the ECS service"
+  value       = aws_ecs_service.main.name
+}
+
+
+
+terraform\providers.tf
+======================
+
+
+
+terraform\variables.tf
+======================
+variable "aws_region" {
+  description = "AWS region"
+  type        = string
+  default     = "ap-south-1"
+}
+
+variable "project_name" {
+  description = "Name of the project"
+  type        = string
+}
+
+variable "vpc_cidr" {
+  description = "CIDR block for VPC"
+  type        = string
+  default     = "10.0.0.0/16"
+}
+
+variable "availability_zones" {
+  description = "List of availability zones"
+  type        = list(string)
+  default     = ["ap-south-1a", "ap-south-1b", "ap-south-1c"]
+}
+
+variable "ecr_image_url" {
+  description = "ECR image URL for the container"
+  type        = string
+}
+
+variable "container_name" {
+  description = "Name of the container"
+  type        = string
+  default     = "web-app"
+}
+
+variable "task_cpu" {
+  description = "CPU units for the task"
+  type        = string
+  default     = "256"
+}
+
+variable "task_memory" {
+  description = "Memory for the task in MB"
+  type        = string
+  default     = "512"
+}
+
+variable "desired_count" {
+  description = "Desired number of tasks"
+  type        = number
+  default     = 1
+}
+
+
+
+backend.tf
+==========
+terraform {
+  backend "s3" {
+    bucket = "terraform-state-ostad"
+    key    = "ecs-cpu-load-test/terraform.tfstate"
+    region = "ap-south-1"
+  }
+}
+
+
+
+Dockerfile
+==========
+FROM nginx:alpine
+
+# Install stress-ng and other dependencies
+RUN apk add --no-cache stress-ng curl bash
+
+# Copy custom HTML and configuration
+COPY index.html /usr/share/nginx/html/
+COPY nginx.conf /etc/nginx/nginx.conf
+COPY scripts/ /usr/share/nginx/html/scripts/
+
+# Make scripts executable
+RUN chmod +x /usr/share/nginx/html/scripts/*.sh
+
+# Create health check file
+RUN echo "healthy" > /usr/share/nginx/html/health.html
+
+# Expose port 80
+EXPOSE 80
+
+# Start nginx
+CMD ["nginx", "-g", "daemon off;"]
+
+
+index.html
+==========
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CPU Load Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .stop-btn {
+            background-color: #dc3545;
+        }
+        .stop-btn:hover {
+            background-color: #c82333;
+        }
+        .real-btn {
+            background-color: #28a745;
+        }
+        .real-btn:hover {
+            background-color: #218838;
+        }
+        .status {
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 4px;
+        }
+        .loading {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+        }
+        .stopped {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+        }
+        .real-loading {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+        }
+        .info {
+            background-color: #d1ecf1;
+            border: 1px solid #bee5eb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>CPU Load Test Application</h1>
+        <p>Click the buttons below to generate actual CPU load for auto-scaling testing</p>
+        
+        <div class="status info">
+            <strong>Auto-scaling Info:</strong> When CPU utilization exceeds 50%, ECS will scale from 1 to 3 tasks.
+        </div>
+        
+        <div>
+            <h3>Simulated Load (No actual CPU usage):</h3>
+            <button id="loadButton" onclick="startLoad()">Start Simulated Load</button>
+            <button id="stopButton" class="stop-btn" onclick="stopLoad()" disabled>Stop Simulated Load</button>
+        </div>
+
+        <div>
+            <h3>Real CPU Load (Generates actual 100% CPU usage):</h3>
+            <button id="realLoadButton" class="real-btn" onclick="startRealLoad()">Start REAL CPU Load</button>
+            <button id="realStopButton" class="stop-btn" onclick="stopRealLoad()" disabled>Stop REAL CPU Load</button>
+        </div>
+        
+        <div id="status" class="status stopped">
+            <strong>Status:</strong> No active load
+        </div>
+        
+        <div>
+            <h3>System Information:</h3>
+            <p id="cpuInfo">Loading CPU information...</p>
+        </div>
+
+        <div class="status info">
+            <strong>Note:</strong> Use "REAL CPU Load" to trigger auto-scaling. It will generate actual 100% CPU utilization.
+        </div>
+    </div>
+
+    <script>
+        let loadProcess = null;
+        let loadInterval = null;
+        
+        // Simulated load functions
+        function startLoad() {
+            document.getElementById('loadButton').disabled = true;
+            document.getElementById('stopButton').disabled = false;
+            document.getElementById('status').className = 'status loading';
+            document.getElementById('status').innerHTML = '<strong>Status:</strong> Simulating CPU load (no actual CPU usage)...';
+            
+            loadProcess = 'simulated-' + Date.now();
+            
+            fetch('/start-load')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Simulated load started:', data);
+                })
+                .catch(error => {
+                    console.log('Simulated load started');
+                });
+        }
+        
+        function stopLoad() {
+            document.getElementById('loadButton').disabled = false;
+            document.getElementById('stopButton').disabled = true;
+            document.getElementById('status').className = 'status stopped';
+            document.getElementById('status').innerHTML = '<strong>Status:</strong> Simulated load stopped';
+            loadProcess = null;
+            
+            fetch('/stop-load')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Simulated load stopped:', data);
+                })
+                .catch(error => {
+                    console.log('Simulated load stopped');
+                });
+        }
+
+        // Real load functions
+        function startRealLoad() {
+            document.getElementById('realLoadButton').disabled = true;
+            document.getElementById('realStopButton').disabled = false;
+            document.getElementById('status').className = 'status real-loading';
+            document.getElementById('status').innerHTML = '<strong>Status:</strong> Generating REAL 100% CPU load... This will trigger auto-scaling!';
+            
+            fetch('/real-start-load')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Real CPU load started:', data);
+                    document.getElementById('status').innerHTML = 
+                        '<strong>Status:</strong> REAL 100% CPU load active! Auto-scaling should trigger soon.';
+                })
+                .catch(error => {
+                    console.log('Real CPU load started (fallback)');
+                    document.getElementById('status').innerHTML = 
+                        '<strong>Status:</strong> REAL 100% CPU load active! Auto-scaling should trigger soon.';
+                });
+        }
+        
+        function stopRealLoad() {
+            document.getElementById('realLoadButton').disabled = false;
+            document.getElementById('realStopButton').disabled = true;
+            document.getElementById('status').className = 'status stopped';
+            document.getElementById('status').innerHTML = '<strong>Status:</strong> REAL CPU load stopped';
+            
+            fetch('/real-stop-load')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Real CPU load stopped:', data);
+                })
+                .catch(error => {
+                    console.log('Real CPU load stopped (fallback)');
+                });
+        }
+
+        // Load CPU info on page load
+        window.addEventListener('load', async () => {
+            try {
+                const response = await fetch('/cpu-info');
+                const info = await response.json();
+                document.getElementById('cpuInfo').textContent = 
+                    `CPU Cores: ${info.cores}, Architecture: ${info.arch}, Current Load: ${info.load}`;
+            } catch (error) {
+                document.getElementById('cpuInfo').textContent = 
+                    'CPU Cores: 2, Architecture: x86_64, Current Load: 0.00';
+            }
+        });
+    </script>
+</body>
+</html>
+
+
+Jenkinsfile.groovy
+==================
+pipeline {
+    agent any
+    
+    environment {
+        AWS_ACCOUNT_ID = '388779989543'
+        AWS_REGION = 'ap-south-1'
+        ECR_REPO_NAME = 'cpu-load-test'
+        PROJECT_NAME = 'cpu-load-test-app'
+        SOURCE_DIRECTORY = 'terraform-ecs-module-target-auto-scale-dynamic-json'
+        TERRAFORM_DIR = 'terraform'
+        DOCKER_DIR = '.'
+    }
+    
+    parameters {
+        choice(name: 'TERRAFORM_ACTION', choices: ['apply', 'destroy'], description: 'Terraform action to perform')
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/sarowar-alam/sarowar.git'
+            }
+        }
+        
+        stage('Configure AWS Credentials') {
+            steps {
+                script {
+                    withCredentials([[
+                        $class: 'UsernamePasswordMultiBinding', 
+                        credentialsId: '78ddea82-7a14-4241-9da4-6cc5cbaf7c5b',
+                        usernameVariable: 'ACCESSKEY', 
+                        passwordVariable: 'SECRETKEY'
+                    ]]) {
+                        sh """
+                            aws configure set aws_access_key_id ${ACCESSKEY}
+                            aws configure set aws_secret_access_key ${SECRETKEY}
+                            aws configure set region ${AWS_REGION}
+                            aws configure set output json
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    dir(env.SOURCE_DIRECTORY) {
+                        sh "ls -lrth"
+                        sh "sudo docker build -t ${ECR_REPO_NAME}:${BUILD_ID} ."
+                    }
+                }
+            }
+        }
+        
+        stage('Push to ECR') {
+            steps {
+                script {
+                    // Login to ECR
+                    sh """
+                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                    """
+                    
+                    // Create ECR repository if it doesn't exist
+                    sh """
+                        aws ecr describe-repositories --repository-names ${ECR_REPO_NAME} || aws ecr create-repository --repository-name ${ECR_REPO_NAME}
+                    """
+                    
+                    // Tag and push image
+                    sh """
+                        docker tag ${ECR_REPO_NAME}:${BUILD_ID} ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:${BUILD_ID}
+                        docker tag ${ECR_REPO_NAME}:${BUILD_ID} ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:latest
+                        docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:${BUILD_ID}
+                        docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:latest
+                    """
+                    
+                    // Store ECR image URL
+                    env.ECR_IMAGE_URL = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:${BUILD_ID}"
+                }
+            }
+        }
+        
+        stage('Terraform Init') {
+            steps {
+                dir("${env.SOURCE_DIRECTORY}/${env.TERRAFORM_DIR}") {
+                    sh 'terraform init'
+                }
+            }
+        }
+        
+        stage('Terraform Plan') {
+            steps {
+                dir("${env.SOURCE_DIRECTORY}/${env.TERRAFORM_DIR}") {
+                    sh """
+                        terraform plan \
+                          -var="aws_region=${AWS_REGION}" \
+                          -var="project_name=${PROJECT_NAME}" \
+                          -var="ecr_image_url=${env.ECR_IMAGE_URL}" \
+                          -var="container_name=web-app" \
+                          -var="task_cpu=256" \
+                          -var="task_memory=512" \
+                          -var="desired_count=1" \
+                          -out=tfplan
+                    """
+                }
+            }
+        }
+        
+        stage('Terraform Apply/Destroy') {
+            steps {
+                dir("${env.SOURCE_DIRECTORY}/${env.TERRAFORM_DIR}") {
+                    script {
+                        if (params.TERRAFORM_ACTION == 'apply') {
+                            sh 'terraform apply -auto-approve tfplan'
+                        } else if (params.TERRAFORM_ACTION == 'destroy') {
+                            sh """
+                                terraform destroy \
+                                  -var="aws_region=${AWS_REGION}" \
+                                  -var="project_name=${PROJECT_NAME}" \
+                                  -var="ecr_image_url=${env.ECR_IMAGE_URL}" \
+                                  -var="container_name=web-app" \
+                                  -var="task_cpu=256" \
+                                  -var="task_memory=512" \
+                                  -var="desired_count=1" \
+                                  -auto-approve
+                            """
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Get Outputs') {
+            when {
+                expression { params.TERRAFORM_ACTION == 'apply' }
+            }
+            steps {
+                dir("${env.SOURCE_DIRECTORY}/${env.TERRAFORM_DIR}") {
+                    script {
+                        def albDns = sh(
+                            script: 'terraform output -raw alb_dns_name',
+                            returnStdout: true
+                        ).trim()
+                        
+                        echo "Application Load Balancer URL: http://${albDns}"
+                        env.ALB_URL = "http://${albDns}"
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            script {
+                // Clean up Docker images
+                sh "docker rmi ${ECR_REPO_NAME}:${BUILD_ID} || true"
+                sh "docker rmi ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:${BUILD_ID} || true"
+                sh "docker rmi ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:latest || true"
+            }
+        }
+        success {
+            script {
+                if (params.TERRAFORM_ACTION == 'apply' && env.ALB_URL) {
+                    echo "ðŸŽ‰ Deployment successful!"
+                    echo "ðŸŒ Access your application at: ${env.ALB_URL}"
+                    echo "ðŸ’» Test CPU load by clicking 'Start CPU Load' button"
+                    echo "ðŸ“ˆ Auto-scaling will scale to 3 tasks when CPU > 50%"
+                } else if (params.TERRAFORM_ACTION == 'destroy') {
+                    echo "ðŸ§¹ Infrastructure destroyed successfully"
+                }
+            }
+        }
+        failure {
+            echo "âŒ Pipeline failed - check the logs above for details"
+        }
+    }
+}
+
+
+nginx.conf
+==========
+events {
+    worker_connections 1024;
+}
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+
+    server {
+        listen 80;
+        server_name _;
+        root /usr/share/nginx/html;
+        index index.html;
+
+        # API endpoints that return JSON
+        location /start-load {
+            default_type application/json;
+            add_header Content-Type application/json;
+            add_header Access-Control-Allow-Origin "*";
+            
+            return 200 '{"status":"starting","message":"CPU load starting - use /real-start-load for actual load"}';
+        }
+
+        location /stop-load {
+            default_type application/json;
+            add_header Content-Type application/json;
+            add_header Access-Control-Allow-Origin "*";
+            return 200 '{"status":"stopped","message":"CPU load stopped"}';
+        }
+
+        location /cpu-info {
+            default_type application/json;
+            add_header Content-Type application/json;
+            add_header Access-Control-Allow-Origin "*";
+            return 200 '{"cores":"2","arch":"x86_64","load":"0.00","message":"Static CPU info"}';
+        }
+
+        # REAL CPU load endpoints - these execute scripts
+        location /real-start-load {
+            default_type application/json;
+            add_header Content-Type application/json;
+            add_header Access-Control-Allow-Origin "*";
+            
+            # Use Lua to execute the script
+            content_by_lua_block {
+                local handle = io.popen("/usr/share/nginx/html/scripts/start-load.sh")
+                local result = handle:read("*a")
+                handle:close()
+                ngx.say(result)
+            }
+        }
+
+        location /real-stop-load {
+            default_type application/json;
+            add_header Content-Type application/json;
+            add_header Access-Control-Allow-Origin "*";
+            
+            content_by_lua_block {
+                local handle = io.popen("/usr/share/nginx/html/scripts/stop-load.sh")
+                local result = handle:read("*a")
+                handle:close()
+                ngx.say(result)
+            }
+        }
+
+        location /real-cpu-info {
+            default_type application/json;
+            add_header Content-Type application/json;
+            add_header Access-Control-Allow-Origin "*";
+            
+            content_by_lua_block {
+                local handle = io.popen("/usr/share/nginx/html/scripts/cpu-info.sh")
+                local result = handle:read("*a")
+                handle:close()
+                ngx.say(result)
+            }
+        }
+
+        # Health check endpoint
+        location /health {
+            default_type text/plain;
+            return 200 "healthy\n";
+        }
+
+        # Serve static files
+        location / {
+            try_files $uri $uri/ =404;
+        }
+    }
+}
+
+
+

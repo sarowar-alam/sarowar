@@ -47,8 +47,8 @@ pipeline {
             steps {
                 script {
                     dir(env.SOURCE_DIRECTORY) {
-                        sh "ls -lrth"
-                        sh "sudo docker build -t ${ECR_REPO_NAME}:${BUILD_ID} ."
+                        sh "ls -la"
+                        sh "docker build -t ${ECR_REPO_NAME}:${BUILD_ID} ."
                     }
                 }
             }
@@ -76,7 +76,7 @@ pipeline {
                     """
                     
                     // Store ECR image URL
-                    env.ECR_IMAGE_URL = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:${BUILD_ID}"
+                    env.ECR_IMAGE_URL = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:latest"
                 }
             }
         }
@@ -84,7 +84,7 @@ pipeline {
         stage('Terraform Init') {
             steps {
                 dir("${env.SOURCE_DIRECTORY}/${env.TERRAFORM_DIR}") {
-                    sh 'terraform init'
+                    sh 'terraform init -upgrade'
                 }
             }
         }
@@ -145,6 +145,30 @@ pipeline {
                         
                         echo "Application Load Balancer URL: http://${albDns}"
                         env.ALB_URL = "http://${albDns}"
+                        
+                        // Write URL to file for easy access
+                        writeFile file: 'alb-url.txt', text: "Application URL: http://${albDns}"
+                        archiveArtifacts artifacts: 'alb-url.txt'
+                    }
+                }
+            }
+        }
+        
+        stage('Test Deployment') {
+            when {
+                expression { params.TERRAFORM_ACTION == 'apply' }
+            }
+            steps {
+                script {
+                    if (env.ALB_URL) {
+                        // Wait for ALB to be ready
+                        sh "sleep 30"
+                        
+                        // Test the application
+                        sh """
+                            curl -f ${env.ALB_URL} || echo "Application not ready yet"
+                            curl -f ${env.ALB_URL}/health.html || echo "Health check not ready yet"
+                        """
                     }
                 }
             }
@@ -158,6 +182,9 @@ pipeline {
                 sh "docker rmi ${ECR_REPO_NAME}:${BUILD_ID} || true"
                 sh "docker rmi ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:${BUILD_ID} || true"
                 sh "docker rmi ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:latest || true"
+                
+                // Clean up dangling images
+                sh "docker image prune -f || true"
             }
         }
         success {
@@ -165,10 +192,31 @@ pipeline {
                 if (params.TERRAFORM_ACTION == 'apply' && env.ALB_URL) {
                     echo "🎉 Deployment successful!"
                     echo "🌐 Access your application at: ${env.ALB_URL}"
-                    echo "💻 Test CPU load by clicking 'Start CPU Load' button"
+                    echo "🖱️ Test CPU load by clicking 'Start REAL CPU Load' button"
                     echo "📈 Auto-scaling will scale to 3 tasks when CPU > 50%"
+                    
+                    // Create a nice deployment summary
+                    def summary = """
+                    🚀 CPU Load Test Application Deployment Complete!
+                    
+                    📊 Application URL: ${env.ALB_URL}
+                    🔧 Features:
+                      - Real CPU load generation with stress-ng
+                      - Auto-scaling (1-3 tasks based on CPU utilization)
+                      - Load Balancer with health checks
+                      - CloudWatch monitoring
+                    
+                    🧪 To test auto-scaling:
+                      1. Visit ${env.ALB_URL}
+                      2. Click "Start REAL CPU Load"
+                      3. Watch CloudWatch metrics
+                      4. ECS will scale from 1 to 3 tasks when CPU > 50%
+                    
+                    ⏱️ Scaling cooldown: 60 seconds
+                    """
+                    echo summary
                 } else if (params.TERRAFORM_ACTION == 'destroy') {
-                    echo "🧹 Infrastructure destroyed successfully"
+                    echo "🗑️ Infrastructure destroyed successfully"
                 }
             }
         }
