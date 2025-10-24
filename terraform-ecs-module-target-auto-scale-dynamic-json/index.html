@@ -68,6 +68,11 @@
             background-color: #d1ecf1;
             border: 1px solid #bee5eb;
         }
+        .error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
     </style>
 </head>
 <body>
@@ -103,11 +108,43 @@
         <div class="status info">
             <strong>Note:</strong> Use "REAL CPU Load" to trigger auto-scaling. It will generate actual 100% CPU utilization.
         </div>
+
+        <div>
+            <button onclick="testConnection()">Test Connection</button>
+            <button onclick="checkStatus()">Check App Status</button>
+        </div>
     </div>
 
     <script>
         let loadProcess = null;
         let loadInterval = null;
+        
+        // Test connection function
+        function testConnection() {
+            fetch('/health.html')
+                .then(response => {
+                    if (response.ok) {
+                        alert('Connection successful! Application is running.');
+                    } else {
+                        alert('Connection failed!');
+                    }
+                })
+                .catch(error => {
+                    alert('Connection error: ' + error.message);
+                });
+        }
+
+        // Check status function
+        function checkStatus() {
+            fetch('/status')
+                .then(response => response.json())
+                .then(data => {
+                    alert('Application status: ' + JSON.stringify(data));
+                })
+                .catch(error => {
+                    alert('Status check failed: ' + error.message);
+                });
+        }
         
         // Simulated load functions
         function startLoad() {
@@ -116,15 +153,13 @@
             document.getElementById('status').className = 'status loading';
             document.getElementById('status').innerHTML = '<strong>Status:</strong> Simulating CPU load (no actual CPU usage)...';
             
-            loadProcess = 'simulated-' + Date.now();
-            
             fetch('/start-load')
                 .then(response => response.json())
                 .then(data => {
                     console.log('Simulated load started:', data);
                 })
                 .catch(error => {
-                    console.log('Simulated load started');
+                    console.log('Simulated load started (fallback)');
                 });
         }
         
@@ -133,7 +168,6 @@
             document.getElementById('stopButton').disabled = true;
             document.getElementById('status').className = 'status stopped';
             document.getElementById('status').innerHTML = '<strong>Status:</strong> Simulated load stopped';
-            loadProcess = null;
             
             fetch('/stop-load')
                 .then(response => response.json())
@@ -141,7 +175,7 @@
                     console.log('Simulated load stopped:', data);
                 })
                 .catch(error => {
-                    console.log('Simulated load stopped');
+                    console.log('Simulated load stopped (fallback)');
                 });
         }
 
@@ -153,16 +187,22 @@
             document.getElementById('status').innerHTML = '<strong>Status:</strong> Generating REAL 100% CPU load... This will trigger auto-scaling!';
             
             fetch('/real-start-load')
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
                 .then(data => {
                     console.log('Real CPU load started:', data);
                     document.getElementById('status').innerHTML = 
                         '<strong>Status:</strong> REAL 100% CPU load active! Auto-scaling should trigger soon.';
                 })
                 .catch(error => {
-                    console.log('Real CPU load started (fallback)');
+                    console.error('Error starting real load:', error);
+                    document.getElementById('status').className = 'status error';
                     document.getElementById('status').innerHTML = 
-                        '<strong>Status:</strong> REAL 100% CPU load active! Auto-scaling should trigger soon.';
+                        '<strong>Status:</strong> REAL CPU load started (fallback mode). Auto-scaling should trigger soon.';
                 });
         }
         
@@ -173,25 +213,42 @@
             document.getElementById('status').innerHTML = '<strong>Status:</strong> REAL CPU load stopped';
             
             fetch('/real-stop-load')
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
                 .then(data => {
                     console.log('Real CPU load stopped:', data);
                 })
                 .catch(error => {
-                    console.log('Real CPU load stopped (fallback)');
+                    console.error('Error stopping real load:', error);
                 });
         }
 
         // Load CPU info on page load
         window.addEventListener('load', async () => {
             try {
-                const response = await fetch('/cpu-info');
+                const response = await fetch('/real-cpu-info');
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
                 const info = await response.json();
                 document.getElementById('cpuInfo').textContent = 
                     `CPU Cores: ${info.cores}, Architecture: ${info.arch}, Current Load: ${info.load}`;
             } catch (error) {
-                document.getElementById('cpuInfo').textContent = 
-                    'CPU Cores: 2, Architecture: x86_64, Current Load: 0.00';
+                console.error('Error loading CPU info:', error);
+                // Try fallback endpoint
+                try {
+                    const response = await fetch('/cpu-info');
+                    const info = await response.json();
+                    document.getElementById('cpuInfo').textContent = 
+                        `CPU Cores: ${info.cores}, Architecture: ${info.arch}, Current Load: ${info.load}`;
+                } catch (fallbackError) {
+                    document.getElementById('cpuInfo').textContent = 
+                        'CPU Cores: 2, Architecture: x86_64, Current Load: 0.00 (Fallback)';
+                }
             }
         });
     </script>
