@@ -185,6 +185,30 @@ pipeline {
                 
                 // Clean up dangling images
                 sh "docker image prune -f || true"
+
+                    try {
+                        // Check if the workspace directory exists
+                        if (fileExists(env.WORKSPACE)) {
+                            echo "Cleaning up workspace: ${env.WORKSPACE}"
+
+                            // First approach: Delete all files and directories in the workspace
+                            deleteDir()
+
+                            // Second approach: Use cleanWs for more advanced cleanup with patterns
+                            cleanWs(cleanWhenNotBuilt: false,
+                                    deleteDirs: true,
+                                    disableDeferredWipeout: true,
+                                    notFailBuild: true,
+                                    patterns: [[pattern: '.gitignore', type: 'INCLUDE'],
+                                            [pattern: '.propsfile', type: 'EXCLUDE']])
+                        } else {
+                            echo "Workspace directory does not exist or already cleaned."
+                        }
+                    } catch (Exception e) {
+                        // Log the error but do not fail the build
+                        echo "Error during workspace cleanup: ${e.message}"
+                    }
+                                    
             }
         }
         success {
@@ -223,5 +247,9 @@ pipeline {
         failure {
             echo "❌ Pipeline failed - check the logs above for details"
         }
+
+
+
+
     }
 }
