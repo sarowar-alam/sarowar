@@ -37,6 +37,18 @@ echo ""
 echo "{\"status\": \"stopped\", \"message\": \"CPU load generation stopped\"}"
 
 
+terraform\backend.tf
+====================
+terraform {
+  backend "s3" {
+    bucket = "terraform-state-ostad"
+    key    = "ecs-cpu-load-test/terraform.tfstate"
+    region = "us-east-1"
+  }
+}
+
+
+
 terraform\main.tf
 =================
 terraform {
@@ -470,18 +482,6 @@ variable "desired_count" {
 
 
 
-backend.tf
-==========
-terraform {
-  backend "s3" {
-    bucket = "terraform-state-ostad"
-    key    = "ecs-cpu-load-test/terraform.tfstate"
-    region = "ap-south-1"
-  }
-}
-
-
-
 Dockerfile
 ==========
 FROM nginx:alpine
@@ -792,7 +792,7 @@ pipeline {
         AWS_ACCOUNT_ID = '388779989543'
         AWS_REGION = 'ap-south-1'
         ECR_REPO_NAME = 'cpu-load-test'
-        PROJECT_NAME = 'cpu-load-test-app'
+        PROJECT_NAME = 'cpu-load-test-app-04'
         SOURCE_DIRECTORY = 'terraform-ecs-module-target-auto-scale-dynamic-json'
         TERRAFORM_DIR = 'terraform'
         DOCKER_DIR = '.'

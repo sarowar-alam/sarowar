@@ -6,7 +6,7 @@ pipeline {
         AWS_REGION = 'ap-south-1'
         ECR_REPO_NAME = 'cpu-load-test'
         PROJECT_NAME = 'cpu-load-test-app-04'
-        SOURCE_DIRECTORY = 'terraform-ecs-module-target-auto-scale-dynamic-json'
+        SOURCE_DIRECTORY = 'terraform-ecs-module-target-auto-scale-dynamic-json-working'
         TERRAFORM_DIR = 'terraform'
         DOCKER_DIR = '.'
     }
