@@ -24,12 +24,9 @@ RUN echo "<html><body><h1>500 - Server Error</h1></body></html>" > /usr/share/ng
 # Fix shebang in scripts to use sh
 RUN sed -i 's|#!/bin/bash|#!/bin/sh|' /usr/share/nginx/html/scripts/*.sh
 
-# Create a startup script that runs nginx and sets up the environment
+# Create a startup script that runs nginx
 RUN echo '#!/bin/sh' > /start.sh && \
     echo 'echo "Starting CPU Load Test Application..."' >> /start.sh && \
-    echo 'echo "Installed stress-ng version:"' >> /start.sh && \
-    echo 'stress-ng --version 2>/dev/null || echo "stress-ng not found"' >> /start.sh && \
-    echo 'echo "Starting nginx..."' >> /start.sh && \
     echo 'nginx -g "daemon off;"' >> /start.sh && \
     chmod +x /start.sh
 
