@@ -27,38 +27,21 @@ pipeline {
             steps {
                 script {
                     withCredentials([[
-                        $class: 'UsernamePasswordMultiBinding',
+                        $class: 'UsernamePasswordMultiBinding', 
                         credentialsId: '8a4b3949-38f5-4be8-8a5a-c9ce32b05067',
-                        usernameVariable: 'ACCESSKEY',
+                        usernameVariable: 'ACCESSKEY', 
                         passwordVariable: 'SECRETKEY'
                     ]]) {
-                        // Use a shell block with error handling
-                        sh '''
-                            set -e  # Stop on error
-                            echo "🔐 Configuring AWS credentials..."
-
-                            # Export credentials for this session only
-                            export AWS_ACCESS_KEY_ID="${ACCESSKEY}"
-                            export AWS_SECRET_ACCESS_KEY="${SECRETKEY}"
-                            export AWS_REGION="${AWS_REGION:-us-east-1}"
-                            export AWS_DEFAULT_OUTPUT="json"
-
-                            # Verify configuration
-                            echo "🧭 Verifying AWS identity..."
-                            if ! aws sts get-caller-identity > /tmp/aws_identity.json 2>/tmp/aws_error.log; then
-                                echo "❌ Failed to validate AWS credentials."
-                                cat /tmp/aws_error.log
-                                exit 1
-                            fi
-
-                            echo "✅ AWS credentials configured successfully."
-                            cat /tmp/aws_identity.json | jq .
-                        '''
+                        sh """
+                            aws configure set aws_access_key_id ${ACCESSKEY}
+                            aws configure set aws_secret_access_key ${SECRETKEY}
+                            aws configure set region ${AWS_REGION}
+                            aws configure set output json
+                        """
                     }
                 }
             }
         }
-
         
         stage('Build Docker Image') {
             steps {
