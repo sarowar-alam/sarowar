@@ -1,38 +1,35 @@
-FROM node:18-alpine
+FROM node:alpine
 
-# Install stress-ng for CPU load generation
-RUN apk add --no-cache stress-ng
+# Install stress-ng and curl for health checks
+RUN apk add --no-cache stress-ng curl
 
 # Create app directory
 WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
-COPY server.js ./
 
-# Create public directory
+# Install dependencies
+RUN npm install --production
+
+# Copy app files
+COPY server.js ./
 RUN mkdir -p public
 COPY public/index.html public/
 
-# Install dependencies
-RUN npm install
-
 # Create non-root user
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nodejs -u 1001
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001 && \
+    chown -R nodejs:nodejs /app
 
-# Change ownership of the app directory
-RUN chown -R nodejs:nodejs /app
-
-# Switch to non-root user
 USER nodejs
 
-# Expose port
+# Expose port 3000
 EXPOSE 3000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:3000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
+# Enhanced health check for container runtime
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:3000/health || exit 1
 
 # Start the application
-CMD ["npm", "start"]
+CMD ["node", "server.js"]
