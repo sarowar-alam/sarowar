@@ -75,6 +75,13 @@ resource "aws_security_group" "alb" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -94,8 +101,8 @@ resource "aws_security_group" "ecs" {
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    from_port       = 80
-    to_port         = 80
+    from_port       = 3000
+    to_port         = 3000
     protocol        = "tcp"
     security_groups = [aws_security_group.alb.id]
   }
@@ -140,11 +147,13 @@ resource "aws_ecs_task_definition" "main" {
     name      = var.container_name
     image     = var.ecr_image_url
     essential = true
+
     portMappings = [{
-      containerPort = 80
-      hostPort      = 80
+      containerPort = 3000 # Changed from 80 to 3000
+      hostPort      = 3000 # Changed from 80 to 3000
       protocol      = "tcp"
     }]
+
     logConfiguration = {
       logDriver = "awslogs"
       options = {
@@ -153,16 +162,26 @@ resource "aws_ecs_task_definition" "main" {
         "awslogs-stream-prefix" = "ecs"
       }
     }
+
     environment = [
       {
-        name  = "NGINX_HOST"
-        value = "localhost"
+        name  = "PORT"
+        value = "3000"
       },
       {
-        name  = "NGINX_PORT"
-        value = "80"
+        name  = "NODE_ENV"
+        value = "production"
       }
     ]
+
+    # Health check for the Node.js application
+    healthCheck = {
+      command     = ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
+      interval    = 30
+      timeout     = 5
+      retries     = 3
+      startPeriod = 60
+    }
   }])
 
   tags = {
@@ -188,7 +207,7 @@ resource "aws_lb" "main" {
 # Target Group
 resource "aws_lb_target_group" "main" {
   name        = "${var.project_name}-tg"
-  port        = 80
+  port        = 3000 # Changed from 80 to 3000
   protocol    = "HTTP"
   vpc_id      = aws_vpc.main.id
   target_type = "ip"
@@ -196,9 +215,9 @@ resource "aws_lb_target_group" "main" {
   health_check {
     enabled             = true
     healthy_threshold   = 2
-    unhealthy_threshold = 2
+    unhealthy_threshold = 3
     timeout             = 5
-    path                = "/health.html"
+    path                = "/health" # Changed to Node.js health endpoint
     protocol            = "HTTP"
     interval            = 30
     matcher             = "200"
@@ -242,7 +261,12 @@ resource "aws_ecs_service" "main" {
   load_balancer {
     target_group_arn = aws_lb_target_group.main.arn
     container_name   = var.container_name
-    container_port   = 80
+    container_port   = 3000 # Changed from 80 to 3000
+  }
+
+  # Allow external changes without Terraform conflict
+  lifecycle {
+    ignore_changes = [desired_count]
   }
 
   depends_on = [aws_lb_listener.main]
@@ -342,6 +366,11 @@ output "alb_dns_name" {
   value       = aws_lb.main.dns_name
 }
 
+output "application_url" {
+  description = "Full URL to access the CPU Load Test application"
+  value       = "http://${aws_lb.main.dns_name}"
+}
+
 output "ecs_cluster_name" {
   description = "Name of the ECS cluster"
   value       = aws_ecs_cluster.main.name
@@ -350,9 +379,4 @@ output "ecs_cluster_name" {
 output "ecs_service_name" {
   description = "Name of the ECS service"
   value       = aws_ecs_service.main.name
-}
-
-output "target_group_arn" {
-  description = "ARN of the target group"
-  value       = aws_lb_target_group.main.arn
 }
