@@ -178,13 +178,6 @@ pipeline {
     post {
         always {
             script {
-                Clean up Docker images
-                sh "docker rmi ${ECR_REPO_NAME}:${BUILD_ID} || true"
-                sh "docker rmi ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:${BUILD_ID} || true"
-                sh "docker rmi ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:latest || true"
-                
-                // Clean up dangling images
-                sh "docker image prune -f || true"
 
                     try {
                         // Check if the workspace directory exists
