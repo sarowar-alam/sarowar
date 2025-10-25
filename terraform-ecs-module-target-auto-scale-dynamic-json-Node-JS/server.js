@@ -55,7 +55,94 @@ function checkStressNG() {
     });
 }
 
+// Enhanced health check function
+function performHealthCheck() {
+    return new Promise((resolve) => {
+        // Check memory usage
+        const memoryUsage = process.memoryUsage();
+        const memoryPercent = (memoryUsage.heapUsed / memoryUsage.heapTotal) * 100;
+
+        // Check if application can respond
+        const healthStatus = {
+            status: 'healthy',
+            timestamp: new Date().toISOString(),
+            uptime: process.uptime(),
+            memory: {
+                used: Math.round(memoryUsage.heapUsed / 1024 / 1024) + ' MB',
+                total: Math.round(memoryUsage.heapTotal / 1024 / 1024) + ' MB',
+                percentage: Math.round(memoryPercent) + '%'
+            },
+            activeStressProcesses: activeStressProcesses.length,
+            node_env: process.env.NODE_ENV || 'development'
+        };
+
+        // Mark as unhealthy if memory usage is too high
+        if (memoryPercent > 90) {
+            healthStatus.status = 'unhealthy';
+            healthStatus.message = 'High memory usage detected';
+        }
+
+        resolve(healthStatus);
+    });
+}
+
 // API Routes
+
+// Enhanced health check endpoint
+app.get('/health', async (req, res) => {
+    try {
+        const healthStatus = await performHealthCheck();
+
+        // Return appropriate status code based on health
+        if (healthStatus.status === 'healthy') {
+            res.status(200).json(healthStatus);
+        } else {
+            res.status(503).json(healthStatus);
+        }
+    } catch (error) {
+        res.status(503).json({
+            status: 'unhealthy',
+            timestamp: new Date().toISOString(),
+            error: error.message,
+            message: 'Health check failed'
+        });
+    }
+});
+
+// Liveness probe - simple check if app is running
+app.get('/health/live', (req, res) => {
+    res.status(200).json({
+        status: 'alive',
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Readiness probe - check if app is ready to serve traffic
+app.get('/health/ready', async (req, res) => {
+    try {
+        // Perform basic checks
+        const healthStatus = await performHealthCheck();
+
+        if (healthStatus.status === 'healthy') {
+            res.status(200).json({
+                status: 'ready',
+                timestamp: new Date().toISOString()
+            });
+        } else {
+            res.status(503).json({
+                status: 'not_ready',
+                timestamp: new Date().toISOString(),
+                message: 'Application not ready to serve traffic'
+            });
+        }
+    } catch (error) {
+        res.status(503).json({
+            status: 'not_ready',
+            timestamp: new Date().toISOString(),
+            error: error.message
+        });
+    }
+});
 
 // Start real CPU load
 app.post('/real-start-load', async (req, res) => {
@@ -66,7 +153,7 @@ app.post('/real-start-load', async (req, res) => {
         await stopAllStressProcesses();
 
         const cpuCount = os.cpus().length;
-        const duration = req.body.duration || 300; // Default 5 minutes
+        const duration = req.body.duration || 300;
 
         console.log(`Starting stress-ng on ${cpuCount} cores for ${duration} seconds`);
 
@@ -94,7 +181,6 @@ app.post('/real-start-load', async (req, res) => {
 
         stressProcess.on('close', (code) => {
             console.log(`stress-ng process exited with code ${code}`);
-            // Remove from active processes
             activeStressProcesses = activeStressProcesses.filter(p => p !== stressProcess);
         });
 
@@ -115,12 +201,11 @@ app.post('/real-start-load', async (req, res) => {
     }
 });
 
-// Alternative method using exec (more reliable)
+// Alternative method using exec
 app.post('/real-start-load-exec', async (req, res) => {
     try {
         console.log('🚀 Starting real CPU load using exec...');
 
-        // Stop any existing processes first
         await stopAllStressProcesses();
 
         const cpuCount = os.cpus().length;
@@ -184,7 +269,6 @@ async function stopAllStressProcesses() {
     return new Promise((resolve) => {
         console.log('Stopping all stress processes...');
 
-        // Kill active Node.js child processes
         activeStressProcesses.forEach(process => {
             try {
                 process.kill('SIGTERM');
@@ -194,7 +278,6 @@ async function stopAllStressProcesses() {
         });
         activeStressProcesses = [];
 
-        // Kill any stress-ng processes that might be running
         exec('pkill -f stress-ng || true', (error) => {
             if (error) {
                 console.log('No stress-ng processes found or error killing:', error);
@@ -220,7 +303,6 @@ app.get('/real-cpu-info', async (req, res) => {
             hostname: os.hostname()
         };
 
-        // Check if stress-ng is running
         const isStressRunning = await new Promise((resolve) => {
             exec('pgrep stress-ng', (error) => {
                 resolve(!error);
@@ -241,7 +323,7 @@ app.get('/real-cpu-info', async (req, res) => {
     }
 });
 
-// Get current CPU usage (more detailed)
+// Get current CPU usage
 app.get('/cpu-usage', async (req, res) => {
     try {
         const cpuUsage = await getCPUUsage();
@@ -266,15 +348,6 @@ app.get('/cpu-usage', async (req, res) => {
     }
 });
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-    res.json({
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime()
-    });
-});
-
 // Application status
 app.get('/status', (req, res) => {
     res.json({
@@ -282,7 +355,8 @@ app.get('/status', (req, res) => {
         name: 'CPU Load Test Application',
         version: '1.0.0',
         timestamp: new Date().toISOString(),
-        activeStressProcesses: activeStressProcesses.length
+        activeStressProcesses: activeStressProcesses.length,
+        environment: process.env.NODE_ENV || 'development'
     });
 });
 
@@ -332,21 +406,23 @@ app.listen(PORT, async () => {
     console.log(`💻 CPU Cores: ${os.cpus().length}`);
     console.log(`🖥️  Architecture: ${os.arch()}`);
     console.log(`📊 Platform: ${os.platform()}`);
+    console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log('='.repeat(60));
     console.log('Endpoints:');
-    console.log('  GET  /              - Web interface');
-    console.log('  POST /real-start-load - Start CPU load');
-    console.log('  POST /real-stop-load  - Stop CPU load');
-    console.log('  GET  /real-cpu-info   - CPU information');
-    console.log('  GET  /cpu-usage       - Current CPU usage');
-    console.log('  GET  /health          - Health check');
-    console.log('  GET  /status          - Application status');
+    console.log('  GET  /                 - Web interface');
+    console.log('  GET  /health           - Health check');
+    console.log('  GET  /health/live      - Liveness probe');
+    console.log('  GET  /health/ready     - Readiness probe');
+    console.log('  POST /real-start-load  - Start CPU load');
+    console.log('  POST /real-stop-load   - Stop CPU load');
+    console.log('  GET  /real-cpu-info    - CPU information');
+    console.log('  GET  /cpu-usage        - Current CPU usage');
+    console.log('  GET  /status           - Application status');
     console.log('='.repeat(60));
 
     if (!stressAvailable) {
         console.log('❌ WARNING: stress-ng is not installed!');
         console.log('   CPU load generation will not work properly.');
-        console.log('   Make sure stress-ng is installed in the Docker container.');
     }
 });
 
