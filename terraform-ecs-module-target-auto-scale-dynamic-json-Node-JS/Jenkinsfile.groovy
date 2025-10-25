@@ -22,26 +22,43 @@ pipeline {
                     url: 'https://github.com/sarowar-alam/sarowar.git'
             }
         }
-        
+                
         stage('Configure AWS Credentials') {
             steps {
                 script {
                     withCredentials([[
-                        $class: 'UsernamePasswordMultiBinding', 
+                        $class: 'UsernamePasswordMultiBinding',
                         credentialsId: '1bea5c28-13d4-4902-9373-38e3f1832132',
-                        usernameVariable: 'ACCESSKEY', 
+                        usernameVariable: 'ACCESSKEY',
                         passwordVariable: 'SECRETKEY'
                     ]]) {
-                        sh """
-                            aws configure set aws_access_key_id ${ACCESSKEY}
-                            aws configure set aws_secret_access_key ${SECRETKEY}
-                            aws configure set region ${AWS_REGION}
-                            aws configure set output json
-                        """
+                        // Use a shell block with error handling
+                        sh '''
+                            set -e  # Stop on error
+                            echo "🔐 Configuring AWS credentials..."
+
+                            # Export credentials for this session only
+                            export AWS_ACCESS_KEY_ID="${ACCESSKEY}"
+                            export AWS_SECRET_ACCESS_KEY="${SECRETKEY}"
+                            export AWS_REGION="${AWS_REGION:-us-east-1}"
+                            export AWS_DEFAULT_OUTPUT="json"
+
+                            # Verify configuration
+                            echo "🧭 Verifying AWS identity..."
+                            if ! aws sts get-caller-identity > /tmp/aws_identity.json 2>/tmp/aws_error.log; then
+                                echo "❌ Failed to validate AWS credentials."
+                                cat /tmp/aws_error.log
+                                exit 1
+                            fi
+
+                            echo "✅ AWS credentials configured successfully."
+                            cat /tmp/aws_identity.json | jq .
+                        '''
                     }
                 }
             }
         }
+
         
         stage('Build Docker Image') {
             steps {
