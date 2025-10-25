@@ -149,8 +149,8 @@ resource "aws_ecs_task_definition" "main" {
     essential = true
 
     portMappings = [{
-      containerPort = 3000
-      hostPort      = 3000
+      containerPort = 3000 # Changed from 80 to 3000
+      hostPort      = 3000 # Changed from 80 to 3000
       protocol      = "tcp"
     }]
 
@@ -174,13 +174,13 @@ resource "aws_ecs_task_definition" "main" {
       }
     ]
 
-    # Enhanced container health check
+    # Health check for the Node.js application
     healthCheck = {
       command     = ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
       interval    = 30
-      timeout     = 10
+      timeout     = 5
       retries     = 3
-      startPeriod = 90
+      startPeriod = 60
     }
   }])
 
@@ -207,25 +207,21 @@ resource "aws_lb" "main" {
 # Target Group
 resource "aws_lb_target_group" "main" {
   name        = "${var.project_name}-tg"
-  port        = 3000
+  port        = 3000 # Changed from 80 to 3000
   protocol    = "HTTP"
   vpc_id      = aws_vpc.main.id
   target_type = "ip"
 
-  # Enhanced health check configuration
   health_check {
     enabled             = true
     healthy_threshold   = 2
     unhealthy_threshold = 3
-    timeout             = 10
-    path                = "/health"
+    timeout             = 5
+    path                = "/health" # Changed to Node.js health endpoint
     protocol            = "HTTP"
-    interval            = 40
+    interval            = 30
     matcher             = "200"
   }
-
-  # Add deregistration delay for graceful shutdown
-  deregistration_delay = 30
 
   tags = {
     Name = "${var.project_name}-target-group"
@@ -256,9 +252,6 @@ resource "aws_ecs_service" "main" {
   desired_count   = var.desired_count
   launch_type     = "FARGATE"
 
-  # Health check grace period - important for Fargate
-  health_check_grace_period_seconds = 120
-
   network_configuration {
     security_groups  = [aws_security_group.ecs.id]
     subnets          = aws_subnet.public[*].id
@@ -268,12 +261,12 @@ resource "aws_ecs_service" "main" {
   load_balancer {
     target_group_arn = aws_lb_target_group.main.arn
     container_name   = var.container_name
-    container_port   = 3000
+    container_port   = 3000 # Changed from 80 to 3000
   }
 
   # Allow external changes without Terraform conflict
   lifecycle {
-    ignore_changes = [desired_count, task_definition]
+    ignore_changes = [desired_count]
   }
 
   depends_on = [aws_lb_listener.main]
@@ -364,52 +357,6 @@ resource "aws_cloudwatch_log_group" "ecs" {
 
   tags = {
     Name = "${var.project_name}-log-group"
-  }
-}
-
-# CloudWatch Alarm for CPU Utilization
-resource "aws_cloudwatch_metric_alarm" "high_cpu" {
-  alarm_name          = "${var.project_name}-high-cpu"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = "2"
-  metric_name         = "CPUUtilization"
-  namespace           = "AWS/ECS"
-  period              = "120"
-  statistic           = "Average"
-  threshold           = "80"
-  alarm_description   = "This metric monitors ECS CPU utilization"
-  alarm_actions       = []
-
-  dimensions = {
-    ClusterName = aws_ecs_cluster.main.name
-    ServiceName = aws_ecs_service.main.name
-  }
-
-  tags = {
-    Name = "${var.project_name}-high-cpu-alarm"
-  }
-}
-
-# CloudWatch Alarm for Memory Utilization
-resource "aws_cloudwatch_metric_alarm" "high_memory" {
-  alarm_name          = "${var.project_name}-high-memory"
-  comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = "2"
-  metric_name         = "MemoryUtilization"
-  namespace           = "AWS/ECS"
-  period              = "120"
-  statistic           = "Average"
-  threshold           = "80"
-  alarm_description   = "This metric monitors ECS memory utilization"
-  alarm_actions       = []
-
-  dimensions = {
-    ClusterName = aws_ecs_cluster.main.name
-    ServiceName = aws_ecs_service.main.name
-  }
-
-  tags = {
-    Name = "${var.project_name}-high-memory-alarm"
   }
 }
 
