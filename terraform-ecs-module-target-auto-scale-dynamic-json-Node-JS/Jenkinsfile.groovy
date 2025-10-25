@@ -32,32 +32,38 @@ pipeline {
                         usernameVariable: 'ACCESSKEY',
                         passwordVariable: 'SECRETKEY'
                     ]]) {
-                        // Use a shell block with error handling
-                        sh '''
-                            set -e  # Stop on error
-                            echo "🔐 Configuring AWS credentials..."
+                        // Use returnStatus to catch exit codes
+                        def status = sh(
+                            script: '''
+                                set -e
+                                echo "🔐 Configuring temporary AWS credentials..."
 
-                            # Export credentials for this session only
-                            export AWS_ACCESS_KEY_ID="${ACCESSKEY}"
-                            export AWS_SECRET_ACCESS_KEY="${SECRETKEY}"
-                            export AWS_REGION="${AWS_REGION:-us-east-1}"
-                            export AWS_DEFAULT_OUTPUT="json"
+                                export AWS_ACCESS_KEY_ID="${ACCESSKEY}"
+                                export AWS_SECRET_ACCESS_KEY="${SECRETKEY}"
+                                export AWS_REGION="${AWS_REGION:-us-east-1}"
+                                export AWS_DEFAULT_OUTPUT="json"
 
-                            # Verify configuration
-                            echo "🧭 Verifying AWS identity..."
-                            if ! aws sts get-caller-identity > /tmp/aws_identity.json 2>/tmp/aws_error.log; then
-                                echo "❌ Failed to validate AWS credentials."
-                                cat /tmp/aws_error.log
-                                exit 1
-                            fi
+                                echo "🧭 Validating credentials..."
+                                aws sts get-caller-identity > /tmp/aws_identity.json 2>/tmp/aws_error.log || exit $?
 
-                            echo "✅ AWS credentials configured successfully."
-                            cat /tmp/aws_identity.json | jq .
-                        '''
+                                echo "✅ Credentials valid:"
+                                cat /tmp/aws_identity.json | jq .
+                            ''',
+                            returnStatus: true
+                        )
+
+                        if (status != 0) {
+                            echo "❌ AWS credentials configuration failed!"
+                            sh 'cat /tmp/aws_error.log || true'
+                            error("Stage failed: Could not configure AWS credentials.")
+                        } else {
+                            echo "✅ AWS credentials configured successfully!"
+                        }
                     }
                 }
             }
         }
+
 
         
         stage('Build Docker Image') {
