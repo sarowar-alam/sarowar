@@ -6,7 +6,7 @@ on:
             instance_type:
                 description: "EC2 Instance Type"
                 required: true
-                default: "t2.micro"
+                default: "t3.medium"
             environment:
                 description: "Environment"
                 required: true
@@ -23,7 +23,7 @@ env:
     SUBNET_ID: subnet-0bfed275ea64c759a
     SECURITY_GROUP_ID: sg-09328f064c5cc2ae8
     KEY_PAIR_NAME: sarowar_ostad
-    AMI_ID: ami-02d26659fd82cf299 # Ubuntu 20.04 in ap-south-1
+    AMI_ID: ami-02d26659fd82cf299
 
 jobs:
     deploy-ec2:
@@ -74,40 +74,40 @@ jobs:
                           echo "instance_name=$INSTANCE_NAME" >> $GITHUB_OUTPUT
                           echo "EC2 instance creation initiated: $INSTANCE_ID"
 
-                      - name: Wait for instance running
-                      run: |
-                          aws ec2 wait instance-running \
-                          --instance-ids ${{ steps.create-instance.outputs.instance_id }} \
-                          --region ${{ env.AWS_REGION }}
-                          echo "Instance is now running!"
+            - name: Wait for instance running
+              run: |
+                  aws ec2 wait instance-running \
+                    --instance-ids ${{ steps.create-instance.outputs.instance_id }} \
+                    --region ${{ env.AWS_REGION }}
+                  echo "Instance is now running!"
 
-                      - name: Get connection details
-                      id: instance-info
-                      run: |
-                          INSTANCE_INFO=$(aws ec2 describe-instances \
-                          --instance-ids ${{ steps.create-instance.outputs.instance_id }} \
-                          --query 'Reservations[0].Instances[0]' \
-                          --region ${{ env.AWS_REGION }})
-                          
-                          PUBLIC_IP=$(echo $INSTANCE_INFO | jq -r '.PublicIpAddress')
-                          PRIVATE_IP=$(echo $INSTANCE_INFO | jq -r '.PrivateIpAddress')
-                          INSTANCE_TYPE=$(echo $INSTANCE_INFO | jq -r '.InstanceType')
-                          
-                          echo "public_ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
-                          echo "private_ip=$PRIVATE_IP" >> $GITHUB_OUTPUT
-                          echo "instance_type=$INSTANCE_TYPE" >> $GITHUB_OUTPUT
+            - name: Get connection details
+              id: instance-info
+              run: |
+                  INSTANCE_INFO=$(aws ec2 describe-instances \
+                    --instance-ids ${{ steps.create-instance.outputs.instance_id }} \
+                    --query 'Reservations[0].Instances[0]' \
+                    --region ${{ env.AWS_REGION }})
 
-                      - name: Display instance information
-                      run: |
-                          echo "🎉 EC2 Instance Created Successfully!"
-                          echo "======================================"
-                          echo "Instance Name: ${{ steps.create-instance.outputs.instance_name }}"
-                          echo "Instance ID: ${{ steps.create-instance.outputs.instance_id }}"
-                          echo "Instance Type: ${{ steps.instance-info.outputs.instance_type }}"
-                          echo "Public IP: ${{ steps.instance-info.outputs.public_ip }}"
-                          echo "Private IP: ${{ steps.instance-info.outputs.private_ip }}"
-                          echo "Region: ${{ env.AWS_REGION }}"
-                          echo "Environment: ${{ github.event.inputs.environment }}"
-                          echo ""
-                          echo "SSH Command:"
-                          echo "ssh -i your-key.pem ubuntu@${{ steps.instance-info.outputs.public_ip }}"
+                  PUBLIC_IP=$(echo $INSTANCE_INFO | jq -r '.PublicIpAddress')
+                  PRIVATE_IP=$(echo $INSTANCE_INFO | jq -r '.PrivateIpAddress')
+                  INSTANCE_TYPE=$(echo $INSTANCE_INFO | jq -r '.InstanceType')
+
+                  echo "public_ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
+                  echo "private_ip=$PRIVATE_IP" >> $GITHUB_OUTPUT
+                  echo "instance_type=$INSTANCE_TYPE" >> $GITHUB_OUTPUT
+
+            - name: Display instance information
+              run: |
+                  echo "🎉 EC2 Instance Created Successfully!"
+                  echo "======================================"
+                  echo "Instance Name: ${{ steps.create-instance.outputs.instance_name }}"
+                  echo "Instance ID: ${{ steps.create-instance.outputs.instance_id }}"
+                  echo "Instance Type: ${{ steps.instance-info.outputs.instance_type }}"
+                  echo "Public IP: ${{ steps.instance-info.outputs.public_ip }}"
+                  echo "Private IP: ${{ steps.instance-info.outputs.private_ip }}"
+                  echo "Region: ${{ env.AWS_REGION }}"
+                  echo "Environment: ${{ github.event.inputs.environment }}"
+                  echo ""
+                  echo "SSH Command:"
+                  echo "ssh -i ${{ env.KEY_PAIR_NAME }}.pem ubuntu@${{ steps.instance-info.outputs.public_ip }}"
