@@ -1,113 +1,131 @@
 name: Create EC2 Instance
 
+# Trigger definition - when this workflow should run
 on:
-    workflow_dispatch:
-        inputs:
-            instance_type:
-                description: "EC2 Instance Type"
-                required: true
-                default: "t3.medium"
-            environment:
-                description: "Environment"
-                required: true
-                default: "dev"
-                type: choice
-                options:
-                    - dev
-                    - staging
-                    - prod
+  workflow_dispatch: # Manual trigger from GitHub UI
+    inputs: # User inputs that can be provided when triggering the workflow
+      instance_type:
+        description: "EC2 Instance Type"
+        required: true
+        default: "t3.medium"
+      environment:
+        description: "Environment"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
 
+# Environment variables that will be available throughout the workflow
 env:
-    AWS_REGION: ap-south-1
-    VPC_ID: vpc-01535278f68651f85
-    SUBNET_ID: subnet-0bfed275ea64c759a
-    SECURITY_GROUP_ID: sg-09328f064c5cc2ae8
-    KEY_PAIR_NAME: sarowar_ostad
-    AMI_ID: ami-02d26659fd82cf299
+  AWS_REGION: ap-south-1
+  VPC_ID: vpc-01535278f68651f85
+  SUBNET_ID: subnet-0bfed275ea64c759a
+  SECURITY_GROUP_ID: sg-09328f064c5cc2ae8
+  KEY_PAIR_NAME: sarowar_ostad
+  AMI_ID: ami-02d26659fd82cf299
 
+# Jobs definition - the actual work to be done
 jobs:
-    deploy-ec2:
-        runs-on: ubuntu-latest
+  deploy-ec2: # Job identifier
+    runs-on: ubuntu-latest # The type of machine to run the job on
 
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
+    steps:
+      # Step 1: Checkout the repository code
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-            - name: Configure AWS credentials
-              uses: aws-actions/configure-aws-credentials@v4
-              with:
-                  aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-                  aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-                  aws-region: ${{ env.AWS_REGION }}
+      # Step 2: Configure AWS credentials for CLI access
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-            - name: Create EC2 instance
-              id: create-instance
-              run: |
-                  TIMESTAMP=$(date +%Y%m%d%H%M%S)
-                  INSTANCE_NAME="github-actions-${{ github.event.inputs.environment }}-$TIMESTAMP"
+      # Step 3: Create the EC2 instance
+      - name: Create EC2 instance
+        id: create-instance # Give this step an ID so we can reference its outputs later
+        run: |
+          # Generate timestamp for unique instance naming
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          # Create unique instance name with environment and timestamp
+          INSTANCE_NAME="github-actions-${{ github.event.inputs.environment }}-$TIMESTAMP"
 
-                  # Create user data using heredoc
-                  ENCODED_USER_DATA=$(base64 -w 0 << 'EOF'
-                  #!/bin/bash
-                  apt-get update
-                  apt-get install -y nginx
-                  systemctl start nginx
-                  systemctl enable nginx
-                  echo "<h1>Hello from GitHub Actions EC2!</h1>" > /var/www/html/index.html
-                  EOF
-                  )
-                          
-                          INSTANCE_ID=$(aws ec2 run-instances \
-                          --image-id ${{ env.AMI_ID }} \
-                          --instance-type ${{ github.event.inputs.instance_type }} \
-                          --key-name ${{ env.KEY_PAIR_NAME }} \
-                          --security-group-ids ${{ env.SECURITY_GROUP_ID }} \
-                          --subnet-id ${{ env.SUBNET_ID }} \
-                          --associate-public-ip-address \
-                          --user-data "$ENCODED_USER_DATA" \
-                          --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$INSTANCE_NAME},{Key=Environment,Value=${{ github.event.inputs.environment }}},{Key=CreatedBy,Value=GitHub-Actions}]" \
-                          --query 'Instances[0].InstanceId' \
-                          --output text \
-                          --region ${{ env.AWS_REGION }})
-                          
-                          echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
-                          echo "instance_name=$INSTANCE_NAME" >> $GITHUB_OUTPUT
-                          echo "EC2 instance creation initiated: $INSTANCE_ID"
+          # Create and encode user data script that runs on instance startup
+          # This script installs and configures nginx
+          ENCODED_USER_DATA=$(base64 -w 0 << 'EOF'
+          #!/bin/bash
+          apt-get update
+          apt-get install -y nginx
+          systemctl start nginx
+          systemctl enable nginx
+          echo "<h1>Hello from GitHub Actions EC2!</h1>" > /var/www/html/index.html
+          EOF
+          )
+                  
+          # Launch the EC2 instance with all specified parameters
+          INSTANCE_ID=$(aws ec2 run-instances \
+                  --image-id ${{ env.AMI_ID }} \
+                  --instance-type ${{ github.event.inputs.instance_type }} \
+                  --key-name ${{ env.KEY_PAIR_NAME }} \
+                  --security-group-ids ${{ env.SECURITY_GROUP_ID }} \
+                  --subnet-id ${{ env.SUBNET_ID }} \
+                  --associate-public-ip-address \  # Assign public IP
+                  --user-data "$ENCODED_USER_DATA" \  # Startup script
+                  --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$INSTANCE_NAME},{Key=Environment,Value=${{ github.event.inputs.environment }}},{Key=CreatedBy,Value=GitHub-Actions}]" \
+                  --query 'Instances[0].InstanceId' \  # Extract only the instance ID from response
+                  --output text \
+                  --region ${{ env.AWS_REGION }})
+                  
+          # Set output variables for use in subsequent steps
+          echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+          echo "instance_name=$INSTANCE_NAME" >> $GITHUB_OUTPUT
+          echo "EC2 instance creation initiated: $INSTANCE_ID"
 
-            - name: Wait for instance running
-              run: |
-                  aws ec2 wait instance-running \
-                    --instance-ids ${{ steps.create-instance.outputs.instance_id }} \
-                    --region ${{ env.AWS_REGION }}
-                  echo "Instance is now running!"
+      # Step 4: Wait for the instance to be fully running
+      - name: Wait for instance running
+        run: |
+          # AWS CLI wait command that polls until instance is in running state
+          aws ec2 wait instance-running \
+            --instance-ids ${{ steps.create-instance.outputs.instance_id }} \
+            --region ${{ env.AWS_REGION }}
+          echo "Instance is now running!"
 
-            - name: Get connection details
-              id: instance-info
-              run: |
-                  INSTANCE_INFO=$(aws ec2 describe-instances \
-                    --instance-ids ${{ steps.create-instance.outputs.instance_id }} \
-                    --query 'Reservations[0].Instances[0]' \
-                    --region ${{ env.AWS_REGION }})
+      # Step 5: Retrieve instance connection details
+      - name: Get connection details
+        id: instance-info # ID to reference this step's outputs
+        run: |
+          # Get detailed information about the created instance
+          INSTANCE_INFO=$(aws ec2 describe-instances \
+            --instance-ids ${{ steps.create-instance.outputs.instance_id }} \
+            --query 'Reservations[0].Instances[0]' \
+            --region ${{ env.AWS_REGION }})
 
-                  PUBLIC_IP=$(echo $INSTANCE_INFO | jq -r '.PublicIpAddress')
-                  PRIVATE_IP=$(echo $INSTANCE_INFO | jq -r '.PrivateIpAddress')
-                  INSTANCE_TYPE=$(echo $INSTANCE_INFO | jq -r '.InstanceType')
+          # Extract specific values from the instance info using jq
+          PUBLIC_IP=$(echo $INSTANCE_INFO | jq -r '.PublicIpAddress')
+          PRIVATE_IP=$(echo $INSTANCE_INFO | jq -r '.PrivateIpAddress')
+          INSTANCE_TYPE=$(echo $INSTANCE_INFO | jq -r '.InstanceType')
 
-                  echo "public_ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
-                  echo "private_ip=$PRIVATE_IP" >> $GITHUB_OUTPUT
-                  echo "instance_type=$INSTANCE_TYPE" >> $GITHUB_OUTPUT
+          # Set output variables for use in subsequent steps
+          echo "public_ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
+          echo "private_ip=$PRIVATE_IP" >> $GITHUB_OUTPUT
+          echo "instance_type=$INSTANCE_TYPE" >> $GITHUB_OUTPUT
 
-            - name: Display instance information
-              run: |
-                  echo "🎉 EC2 Instance Created Successfully!"
-                  echo "======================================"
-                  echo "Instance Name: ${{ steps.create-instance.outputs.instance_name }}"
-                  echo "Instance ID: ${{ steps.create-instance.outputs.instance_id }}"
-                  echo "Instance Type: ${{ steps.instance-info.outputs.instance_type }}"
-                  echo "Public IP: ${{ steps.instance-info.outputs.public_ip }}"
-                  echo "Private IP: ${{ steps.instance-info.outputs.private_ip }}"
-                  echo "Region: ${{ env.AWS_REGION }}"
-                  echo "Environment: ${{ github.event.inputs.environment }}"
-                  echo ""
-                  echo "SSH Command:"
-                  echo "ssh -i ${{ env.KEY_PAIR_NAME }}.pem ubuntu@${{ steps.instance-info.outputs.public_ip }}"
+      # Step 6: Display final instance information
+      - name: Display instance information
+        run: |
+          echo "🎉 EC2 Instance Created Successfully!"
+          echo "======================================"
+          echo "Instance Name: ${{ steps.create-instance.outputs.instance_name }}"
+          echo "Instance ID: ${{ steps.create-instance.outputs.instance_id }}"
+          echo "Instance Type: ${{ steps.instance-info.outputs.instance_type }}"
+          echo "Public IP: ${{ steps.instance-info.outputs.public_ip }}"
+          echo "Private IP: ${{ steps.instance-info.outputs.private_ip }}"
+          echo "Region: ${{ env.AWS_REGION }}"
+          echo "Environment: ${{ github.event.inputs.environment }}"
+          echo ""
+          echo "SSH Command:"
+          echo "ssh -i ${{ env.KEY_PAIR_NAME }}.pem ubuntu@${{ steps.instance-info.outputs.public_ip }}"
