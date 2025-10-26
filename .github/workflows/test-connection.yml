@@ -28,7 +28,7 @@ jobs:
           # AWS Secret Access Key from GitHub secrets
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           # AWS region to operate in
-          aws-region: us-east-1
+          aws-region: ap-south-1
 
       # Step 3: Test the AWS connection
       # This verifies that the AWS CLI can authenticate successfully
