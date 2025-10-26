@@ -1,0 +1,86 @@
+name: Deploy to Production
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to deploy (format: v1.0.0)"
+        required: true
+
+env:
+  AWS_REGION: "ap-south-1"
+  ECR_REPO_NAME: "cpu-load-test-production"
+  PROJECT_NAME: "cpu-load-test-production"
+  ENVIRONMENT: "production"
+
+jobs:
+  pre-deployment-checks:
+    name: Pre-deployment Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate tag format
+        run: |
+          chmod +x .github/scripts/validate-tags.sh
+          .github/scripts/validate-tags.sh ${{ github.ref }}
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    environment: production
+    needs: pre-deployment-checks
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Build and Push Docker Image
+        id: build
+        uses: ./.github/actions/build-docker
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          ecr-repo-name: ${{ env.ECR_REPO_NAME }}
+          image-tag: ${{ github.ref_name }}
+
+      - name: Terraform Deploy
+        id: terraform
+        uses: ./.github/actions/terraform-deploy
+        with:
+          environment: ${{ env.ENVIRONMENT }}
+          terraform-action: "apply"
+          aws-region: ${{ env.AWS_REGION }}
+          project-name: ${{ env.PROJECT_NAME }}
+          ecr-image-url: ${{ steps.build.outputs.image-uri }}
+          auto-approve: "true"
+
+      - name: Wait for Application
+        run: |
+          chmod +x .github/scripts/wait-for-app.sh
+          .github/scripts/wait-for-app.sh http://${{ steps.terraform.outputs.alb-dns-name }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: |
+            Production deployment completed successfully!
+
+            🚀 Application URL: http://${{ steps.terraform.outputs.alb-dns-name }}
+            📦 Version: ${{ github.ref_name }}
+            ⏰ Deployed at: ${{ fromJSON(github.event).head_commit.timestamp }}
+          draft: false
+          prerelease: false

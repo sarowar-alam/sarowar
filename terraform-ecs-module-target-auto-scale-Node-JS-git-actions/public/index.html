@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CPU Load Test</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+        
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+        
+        .content {
+            padding: 30px;
+        }
+        
+        .card {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 25px;
+            margin-bottom: 25px;
+            border-left: 4px solid #3498db;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+        }
+        
+        .card.warning {
+            border-left-color: #e74c3c;
+            background: #fff5f5;
+        }
+        
+        .card.success {
+            border-left-color: #27ae60;
+            background: #f0fff4;
+        }
+        
+        .card h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin: 20px 0;
+        }
+        
+        button {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+        
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        
+        .btn-start {
+            background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+            color: white;
+        }
+        
+        .btn-stop {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+            color: white;
+        }
+        
+        .btn-info {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+        }
+        
+        .btn-secondary {
+            background: #95a5a6;
+            color: white;
+        }
+        
+        .status {
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            font-weight: 600;
+            text-align: center;
+        }
+        
+        .status.loading {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+        }
+        
+        .status.stopped {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        
+        .status.error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        
+        .info-item {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #3498db;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        
+        .info-item .label {
+            font-size: 0.9rem;
+            color: #7f8c8d;
+            margin-bottom: 5px;
+        }
+        
+        .info-item .value {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        
+        .metrics {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+        
+        .metrics h4 {
+            margin-bottom: 15px;
+            text-align: center;
+            font-size: 1.2rem;
+        }
+        
+        .progress-bar {
+            background: #34495e;
+            border-radius: 10px;
+            height: 20px;
+            margin: 10px 0;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #e74c3c, #f39c12, #27ae60);
+            border-radius: 10px;
+            transition: width 0.3s ease;
+        }
+        
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #ffffff;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .footer {
+            text-align: center;
+            padding: 20px;
+            background: #ecf0f1;
+            color: #7f8c8d;
+            font-size: 0.9rem;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                margin: 10px;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .controls {
+                flex-direction: column;
+            }
+            
+            button {
+                width: 100%;
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 CPU Load Test Application</h1>
+            <p>Generate actual CPU load to test auto-scaling configurations</p>
+        </div>
+        
+        <div class="content">
+            <div class="card warning">
+                <h3>⚠️ Auto-scaling Information</h3>
+                <p>When CPU utilization exceeds 50%, your ECS service should scale from 1 to 3 tasks. Use the REAL CPU Load button to generate actual 100% CPU utilization and trigger auto-scaling.</p>
+            </div>
+            
+            <div class="card">
+                <h3>🔧 CPU Load Controls</h3>
+                <p>Generate actual 100% CPU utilization on all available cores for 5 minutes.</p>
+                
+                <div class="controls">
+                    <button class="btn-start" onclick="startRealLoad()" id="realLoadButton">
+                        <span>🚀 Start REAL CPU Load</span>
+                    </button>
+                    <button class="btn-stop" onclick="stopRealLoad()" id="realStopButton" disabled>
+                        <span>🛑 Stop REAL CPU Load</span>
+                    </button>
+                    <button class="btn-info" onclick="refreshCPUInfo()">
+                        <span>🔄 Refresh Info</span>
+                    </button>
+                </div>
+                
+                <div id="status" class="status stopped">
+                    <strong>Status:</strong> No active load
+                </div>
+            </div>
+            
+            <div class="card">
+                <h3>💻 System Information</h3>
+                <div class="info-grid" id="cpuInfoGrid">
+                    <div class="info-item">
+                        <div class="label">CPU Cores</div>
+                        <div class="value" id="cores">Loading...</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="label">Architecture</div>
+                        <div class="value" id="arch">Loading...</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="label">Current Load</div>
+                        <div class="value" id="load">Loading...</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="label">System Uptime</div>
+                        <div class="value" id="uptime">Loading...</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="label">Memory</div>
+                        <div class="value" id="memory">Loading...</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="label">Status</div>
+                        <div class="value" id="currentStatus">Loading...</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="metrics">
+                <h4>📊 Live Metrics</h4>
+                <div>
+                    <div>CPU Usage: <span id="cpuUsage">0%</span></div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="cpuProgress" style="width: 0%"></div>
+                    </div>
+                </div>
+                <div>
+                    <div>Memory Usage: <span id="memoryUsage">0%</span></div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="memoryProgress" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card success">
+                <h3>✅ Utility Functions</h3>
+                <div class="controls">
+                    <button class="btn-secondary" onclick="testConnection()">
+                        <span>🔗 Test Connection</span>
+                    </button>
+                    <button class="btn-secondary" onclick="checkAppStatus()">
+                        <span>📋 Check App Status</span>
+                    </button>
+                    <button class="btn-secondary" onclick="startRealLoadExec()">
+                        <span>⚡ Quick Load (Exec)</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>CPU Load Test Application v1.0.0 | Designed for Auto-scaling Testing</p>
+        </div>
+    </div>
+
+    <script>
+        let metricsInterval;
+        
+        // Real load functions
+        async function startRealLoad() {
+            const startBtn = document.getElementById('realLoadButton');
+            const stopBtn = document.getElementById('realStopButton');
+            const statusDiv = document.getElementById('status');
+            
+            startBtn.disabled = true;
+            startBtn.innerHTML = '<span class="loading-spinner"></span> Starting...';
+            stopBtn.disabled = false;
+            statusDiv.className = 'status loading';
+            statusDiv.innerHTML = '<strong>Status:</strong> Generating REAL 100% CPU load... This will trigger auto-scaling!';
+            
+            try {
+                const response = await fetch('/real-start-load', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ duration: 300 }) // 5 minutes
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    statusDiv.innerHTML = `<strong>Status:</strong> ✅ REAL CPU load active! PID: ${data.pid} | Cores: ${data.cores} | Duration: ${data.duration}s`;
+                    startMetricsMonitoring();
+                } else {
+                    throw new Error(data.message || 'Failed to start load');
+                }
+            } catch (error) {
+                console.error('Error starting real load:', error);
+                statusDiv.className = 'status error';
+                statusDiv.innerHTML = `<strong>Status:</strong> ❌ Error: ${error.message}`;
+            } finally {
+                startBtn.disabled = false;
+                startBtn.innerHTML = '<span>🚀 Start REAL CPU Load</span>';
+            }
+        }
+        
+        async function startRealLoadExec() {
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = 'status loading';
+            statusDiv.innerHTML = '<strong>Status:</strong> Starting quick CPU load (exec method)...';
+            
+            try {
+                const response = await fetch('/real-start-load-exec', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ duration: 60 }) // 1 minute for quick test
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    statusDiv.innerHTML = `<strong>Status:</strong> ✅ Quick CPU load started! ${data.message}`;
+                } else {
+                    throw new Error(data.message || 'Failed to start load');
+                }
+            } catch (error) {
+                console.error('Error starting quick load:', error);
+                statusDiv.className = 'status error';
+                statusDiv.innerHTML = `<strong>Status:</strong> ❌ Error: ${error.message}`;
+            }
+        }
+        
+        async function stopRealLoad() {
+            const startBtn = document.getElementById('realLoadButton');
+            const stopBtn = document.getElementById('realStopButton');
+            const statusDiv = document.getElementById('status');
+            
+            stopBtn.disabled = true;
+            stopBtn.innerHTML = '<span class="loading-spinner"></span> Stopping...';
+            statusDiv.className = 'status loading';
+            statusDiv.innerHTML = '<strong>Status:</strong> Stopping CPU load...';
+            
+            try {
+                const response = await fetch('/real-stop-load', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    statusDiv.className = 'status stopped';
+                    statusDiv.innerHTML = `<strong>Status:</strong> ✅ CPU load stopped. Stopped ${data.stoppedProcesses} processes.`;
+                    stopMetricsMonitoring();
+                } else {
+                    throw new Error(data.message || 'Failed to stop load');
+                }
+            } catch (error) {
+                console.error('Error stopping real load:', error);
+                statusDiv.className = 'status error';
+                statusDiv.innerHTML = `<strong>Status:</strong> ❌ Error: ${error.message}`;
+            } finally {
+                stopBtn.disabled = true;
+                stopBtn.innerHTML = '<span>🛑 Stop REAL CPU Load</span>';
+                startBtn.disabled = false;
+            }
+        }
+        
+        // CPU information functions
+        async function refreshCPUInfo() {
+            try {
+                const response = await fetch('/real-cpu-info');
+                const data = await response.json();
+                
+                if (response.ok) {
+                    document.getElementById('cores').textContent = data.cores;
+                    document.getElementById('arch').textContent = data.arch;
+                    document.getElementById('load').textContent = Array.isArray(data.load) ? data.load.join(', ') : data.load;
+                    document.getElementById('uptime').textContent = data.uptime;
+                    document.getElementById('memory').textContent = data.totalMemory + ' / ' + data.freeMemory + ' free';
+                    document.getElementById('currentStatus').textContent = data.current_status;
+                    
+                    // Update status color based on stress-ng availability
+                    const statusElement = document.getElementById('currentStatus');
+                    if (data.current_status.includes('active')) {
+                        statusElement.style.color = '#e74c3c';
+                    } else {
+                        statusElement.style.color = '#27ae60';
+                    }
+                }
+            } catch (error) {
+                console.error('Error refreshing CPU info:', error);
+            }
+        }
+        
+        // Metrics monitoring
+        function startMetricsMonitoring() {
+            updateMetrics();
+            metricsInterval = setInterval(updateMetrics, 2000); // Update every 2 seconds
+        }
+        
+        function stopMetricsMonitoring() {
+            if (metricsInterval) {
+                clearInterval(metricsInterval);
+                metricsInterval = null;
+            }
+            // Reset metrics display
+            document.getElementById('cpuUsage').textContent = '0%';
+            document.getElementById('cpuProgress').style.width = '0%';
+            document.getElementById('memoryUsage').textContent = '0%';
+            document.getElementById('memoryProgress').style.width = '0%';
+        }
+        
+        async function updateMetrics() {
+            try {
+                const response = await fetch('/cpu-usage');
+                const data = await response.json();
+                
+                if (response.ok) {
+                    const cpuPercent = Math.min(100, Math.max(0, parseFloat(data.cpu.usage)));
+                    const memoryPercent = parseFloat(data.memory.percentage);
+                    
+                    document.getElementById('cpuUsage').textContent = cpuPercent.toFixed(1) + '%';
+                    document.getElementById('cpuProgress').style.width = cpuPercent + '%';
+                    document.getElementById('memoryUsage').textContent = memoryPercent.toFixed(1) + '%';
+                    document.getElementById('memoryProgress').style.width = memoryPercent + '%';
+                }
+            } catch (error) {
+                console.error('Error updating metrics:', error);
+            }
+        }
+        
+        // Utility functions
+        async function testConnection() {
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+                
+                if (response.ok) {
+                    alert('✅ Connection successful!\nApplication is healthy.\nUptime: ' + Math.floor(data.uptime) + ' seconds');
+                } else {
+                    throw new Error('Health check failed');
+                }
+            } catch (error) {
+                alert('❌ Connection failed: ' + error.message);
+            }
+        }
+        
+        async function checkAppStatus() {
+            try {
+                const response = await fetch('/status');
+                const data = await response.json();
+                
+                alert('📋 Application Status:\n' + 
+                      'Name: ' + data.name + '\n' +
+                      'Status: ' + data.status + '\n' +
+                      'Version: ' + data.version + '\n' +
+                      'Active Processes: ' + data.activeStressProcesses + '\n' +
+                      'Timestamp: ' + new Date(data.timestamp).toLocaleString());
+            } catch (error) {
+                alert('❌ Status check failed: ' + error.message);
+            }
+        }
+        
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshCPUInfo();
+            // Start metrics monitoring if we want live updates even without load
+            // startMetricsMonitoring();
+        });
+        
+        // Auto-refresh CPU info every 10 seconds
+        setInterval(refreshCPUInfo, 10000);
+    </script>
+</body>
+</html>

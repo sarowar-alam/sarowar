@@ -1,0 +1,104 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+    inputs:
+      terraform-action:
+        description: "Terraform action"
+        required: true
+        default: "apply"
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+
+env:
+  AWS_REGION: "ap-south-1"
+  ECR_REPO_NAME: "cpu-load-test-staging"
+  PROJECT_NAME: "cpu-load-test-staging"
+  ENVIRONMENT: "staging"
+  PROJECT_DIR: "terraform-ecs-module-target-auto-scale-dynamic-json-Node-JS"
+
+jobs:
+  deploy:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    environment: staging
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Build and Push Docker Image
+        id: build
+        uses: ./.github/actions/build-docker
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          ecr-repo-name: ${{ env.ECR_REPO_NAME }}
+          image-tag: ${{ github.sha }}
+          project-dir: ${{ env.PROJECT_DIR }}
+
+      - name: Terraform Deploy
+        id: terraform
+        uses: ./.github/actions/terraform-deploy
+        with:
+          environment: ${{ env.ENVIRONMENT }}
+          terraform-action: ${{ github.event.inputs.terraform-action || 'apply' }}
+          aws-region: ${{ env.AWS_REGION }}
+          project-name: ${{ env.PROJECT_NAME }}
+          ecr-image-url: ${{ steps.build.outputs.image-uri }}
+          project-dir: ${{ env.PROJECT_DIR }}
+          auto-approve: "true"
+
+      - name: Wait for Application
+        if: github.event.inputs.terraform-action != 'destroy' && steps.terraform.outputs.alb-dns-name
+        run: |
+          chmod +x ${{ env.PROJECT_DIR }}/.github/scripts/wait-for-app.sh
+          ${{ env.PROJECT_DIR }}/.github/scripts/wait-for-app.sh http://${{ steps.terraform.outputs.alb-dns-name }}
+
+      - name: Create Deployment Summary
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          ALB_DNS: ${{ steps.terraform.outputs.alb-dns-name }}
+          ENVIRONMENT: ${{ env.ENVIRONMENT }}
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = `
+            🚀 Deployment to ${process.env.ENVIRONMENT} ${process.env.ALB_DNS ? 'Completed Successfully!' : 'Failed!'}
+
+            ${process.env.ALB_DNS ? `
+            📊 Application URL: http://${process.env.ALB_DNS}
+            ⚡ Features:
+              - Real CPU load generation with stress-ng
+              - Auto-scaling (1-3 tasks based on CPU utilization)
+              - Load Balancer with health checks
+              - CloudWatch monitoring
+
+            👨‍💻 To test auto-scaling:
+              1. Visit http://${process.env.ALB_DNS}
+              2. Click "Start REAL CPU Load"
+              3. Watch CloudWatch metrics
+              4. ECS will scale from 1 to 3 tasks when CPU > 50%
+            ` : '❌ Deployment failed - check workflow logs for details'}
+            `;
+
+            fs.writeFileSync('deployment-summary.md', summary);
+            console.log(summary);
+
+      - name: Upload Deployment Summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-summary
+          path: deployment-summary.md

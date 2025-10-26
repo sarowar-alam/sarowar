@@ -1,0 +1,109 @@
+name: "Terraform Deploy"
+description: "Run Terraform plan/apply/destroy"
+
+inputs:
+  environment:
+    description: "Environment name"
+    required: true
+  terraform-action:
+    description: "Terraform action to perform"
+    required: true
+    default: "plan"
+  aws-region:
+    description: "AWS region"
+    required: true
+    default: "ap-south-1"
+  project-name:
+    description: "Project name"
+    required: true
+  ecr-image-url:
+    description: "ECR image URL"
+    required: true
+  project-dir:
+    description: "Project directory"
+    required: true
+    default: "."
+  auto-approve:
+    description: "Auto-approve terraform apply"
+    required: false
+    default: "false"
+
+outputs:
+  alb-dns-name:
+    description: "ALB DNS name"
+    value: ${{ steps.terraform-output.outputs.alb-dns-name }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+
+    - name: Terraform Init
+      shell: bash
+      run: |
+        cd ${{ inputs.project-dir }}/terraform
+        terraform init -upgrade -reconfigure
+
+    - name: Terraform Format Check
+      shell: bash
+      run: |
+        cd ${{ inputs.project-dir }}/terraform
+        terraform fmt -check -recursive
+
+    - name: Terraform Validate
+      shell: bash
+      run: |
+        cd ${{ inputs.project-dir }}/terraform
+        terraform validate
+
+    - name: Terraform Plan
+      if: inputs.terraform-action == 'plan' || inputs.terraform-action == 'apply'
+      shell: bash
+      run: |
+        cd ${{ inputs.project-dir }}/terraform
+        terraform plan \
+          -var="aws_region=${{ inputs.aws-region }}" \
+          -var="project_name=${{ inputs.project-name }}" \
+          -var="ecr_image_url=${{ inputs.ecr-image-url }}" \
+          -var="container_name=web-app" \
+          -var="task_cpu=256" \
+          -var="task_memory=512" \
+          -var="desired_count=1" \
+          -out=tfplan \
+          -input=false
+
+    - name: Terraform Apply
+      if: inputs.terraform-action == 'apply'
+      shell: bash
+      run: |
+        cd ${{ inputs.project-dir }}/terraform
+        if [ "${{ inputs.auto-approve }}" = "true" ]; then
+          terraform apply -auto-approve tfplan
+        else
+          terraform apply tfplan
+        fi
+
+    - name: Terraform Destroy
+      if: inputs.terraform-action == 'destroy'
+      shell: bash
+      run: |
+        cd ${{ inputs.project-dir }}/terraform
+        terraform destroy \
+          -var="aws_region=${{ inputs.aws-region }}" \
+          -var="project_name=${{ inputs.project-name }}" \
+          -var="ecr_image_url=${{ inputs.ecr-image-url }}" \
+          -var="container_name=web-app" \
+          -var="task_cpu=256" \
+          -var="task_memory=512" \
+          -var="desired_count=1" \
+          -auto-approve
+
+    - name: Get Terraform Outputs
+      if: inputs.terraform-action == 'apply' && success()
+      id: terraform-output
+      shell: bash
+      run: |
+        cd ${{ inputs.project-dir }}/terraform
+        ALB_DNS=$(terraform output -raw alb_dns_name)
+        echo "alb-dns-name=$ALB_DNS" >> $GITHUB_OUTPUT
