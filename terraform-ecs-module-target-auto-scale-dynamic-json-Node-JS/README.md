@@ -1,4 +1,4 @@
-# 🚀 CPU Load Test Application (ECS Auto-Scaling Project)
+# 🚀 AWS ECS Auto-Scaling Project
 
 ## 📘 Overview
 
