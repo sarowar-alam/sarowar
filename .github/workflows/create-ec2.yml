@@ -21,7 +21,7 @@ env:
     AWS_REGION: ap-south-1
     VPC_ID: vpc-01535278f68651f85
     SUBNET_ID: subnet-0bfed275ea64c759a
-    SECURITY_GROUP_ID: sg-your-security-group-id
+    SECURITY_GROUP_ID: sg-09328f064c5cc2ae8
     KEY_PAIR_NAME: sarowar_ostad
     AMI_ID: ami-02d26659fd82cf299 # Ubuntu 20.04 in ap-south-1
 
