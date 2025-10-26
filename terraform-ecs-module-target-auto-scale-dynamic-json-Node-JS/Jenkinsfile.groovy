@@ -2,10 +2,10 @@ pipeline {
     agent any
     
     environment {
-        AWS_ACCOUNT_ID = 'YOUR_ACCOUNT_ID'
+        AWS_ACCOUNT_ID = '388779989543'
         AWS_REGION = 'ap-south-1'
-        ECR_REPO_NAME = 'YOUR_ECR_REPO_NAME'
-        PROJECT_NAME = 'YOUR_PROJECT_NAME'
+        ECR_REPO_NAME = 'cpu-load-test'
+        PROJECT_NAME = 'cpu-load-test-app-05'
         SOURCE_DIRECTORY = 'terraform-ecs-module-target-auto-scale-dynamic-json-Node-JS'
         TERRAFORM_DIR = 'terraform'
         DOCKER_DIR = '.'
@@ -28,7 +28,7 @@ pipeline {
                 script {
                     withCredentials([[
                         $class: 'UsernamePasswordMultiBinding', 
-                        credentialsId: 'YOUR_AWS_CREDENTIALS_ID',
+                        credentialsId: '8a4b3949-38f5-4be8-8a5a-c9ce32b05067',
                         usernameVariable: 'ACCESSKEY', 
                         passwordVariable: 'SECRETKEY'
                     ]]) {
