@@ -1,23 +1,42 @@
+# Workflow name
 name: Test AWS Connection
 
+# Trigger - runs on any push to the repository
 on: [push]
 
+# Jobs definition
 jobs:
-    test:
-        runs-on: ubuntu-latest
+  # Job identifier
+  test:
+    # The type of machine to run the job on
+    runs-on: ubuntu-latest
 
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
+    # Steps to execute in this job
+    steps:
+      # Step 1: Checkout the repository code
+      # This downloads your code to the GitHub runner
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-            - name: Configure AWS credentials
-              uses: aws-actions/configure-aws-credentials@v4
-              with:
-                  aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-                  aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-                  aws-region: us-east-1
+      # Step 2: Configure AWS credentials for CLI access
+      # This sets up AWS authentication using secrets stored in GitHub
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # AWS Access Key ID from GitHub secrets
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          # AWS Secret Access Key from GitHub secrets
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          # AWS region to operate in
+          aws-region: us-east-1
 
-            - name: Test AWS CLI
-              run: |
-                  aws sts get-caller-identity
-                  echo "AWS connection successful!"
+      # Step 3: Test the AWS connection
+      # This verifies that the AWS CLI can authenticate successfully
+      - name: Test AWS CLI
+        run: |
+          # Command to get current IAM user/role identity
+          # This validates that AWS credentials are working correctly
+          aws sts get-caller-identity
+
+          # Success message if previous command executes without errors
+          echo "AWS connection successful!"
