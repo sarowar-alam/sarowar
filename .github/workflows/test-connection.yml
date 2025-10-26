@@ -37,6 +37,5 @@ jobs:
           # Command to get current IAM user/role identity
           # This validates that AWS credentials are working correctly
           aws sts get-caller-identity
-          aws s3 ls
           # Success message if previous command executes without errors
           echo "AWS connection successful!"
