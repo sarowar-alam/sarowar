@@ -35,7 +35,7 @@ jobs:
       - name: Test AWS CLI
         run: |
           # Command to get current IAM user/role identity
-          # This validates that AWS credentials are working correctly
+          # This validates that AWS credentials are working correctly,.
           aws sts get-caller-identity
           aws s3 ls
           aws s3 ls s3://ostad-chunks
