@@ -1,14 +1,9 @@
-name: Deploy to EC2
+name: Test AWS Connection
 
-on:
-    push:
-        branches: [main, master]
-
-env:
-    AWS_REGION: us-east-1 # Change to your region
+on: [push]
 
 jobs:
-    deploy:
+    test:
         runs-on: ubuntu-latest
 
         steps:
@@ -20,14 +15,9 @@ jobs:
               with:
                   aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
                   aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-                  aws-region: ${{ env.AWS_REGION }}
+                  aws-region: us-east-1
 
-            - name: Deploy to EC2
+            - name: Test AWS CLI
               run: |
-                  # Add your deployment commands here
-                  echo "Deploying to EC2 instance..."
-                  # Example: Copy files via SSH (you'll need to set up SSH key)
-                  # scp -r ./* ec2-user@your-ec2-ip:/path/to/deploy
-
-            - name: Print success message
-              run: echo "Deployment workflow completed!"
+                  aws sts get-caller-identity
+                  echo "AWS connection successful!"
