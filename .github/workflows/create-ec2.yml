@@ -1,4 +1,4 @@
-\name: Create EC2 Instance
+name: Create EC2 Instance
 
 # Trigger definition - when this workflow should run
 on:
