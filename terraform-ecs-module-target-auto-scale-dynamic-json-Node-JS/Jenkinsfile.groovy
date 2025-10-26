@@ -100,8 +100,7 @@ pipeline {
                           -var="container_name=web-app" \
                           -var="task_cpu=256" \
                           -var="task_memory=512" \
-                          -var="desired_count=1" \
-                          -out=tfplan
+                          -var="desired_count=1" 
                     """
                 }
             }
@@ -112,7 +111,17 @@ pipeline {
                 dir("${env.SOURCE_DIRECTORY}/${env.TERRAFORM_DIR}") {
                     script {
                         if (params.TERRAFORM_ACTION == 'apply') {
-                            sh 'terraform apply -auto-approve tfplan'
+                            sh """
+                                terraform apply \
+                                -var="aws_region=${AWS_REGION}" \
+                                -var="project_name=${PROJECT_NAME}" \
+                                -var="ecr_image_url=${env.ECR_IMAGE_URL}" \
+                                -var="container_name=web-app" \
+                                -var="task_cpu=256" \
+                                -var="task_memory=512" \
+                                -var="desired_count=1" \
+                                -auto-approve
+                            """
                         } else if (params.TERRAFORM_ACTION == 'destroy') {
                             sh """
                                 terraform destroy \
