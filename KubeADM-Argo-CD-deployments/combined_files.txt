@@ -255,25 +255,6 @@ spec:
       restartPolicy: Always  # Always restart the container if it fails
 
 
-# Deployment Basics:
-# Deployment: Manages a set of identical pods (replicas)
-# Replicas: Ensures 3 identical nginx pods are always running
-# Labels: Used to identify and select pods
-# Update Strategy:
-# RollingUpdate: Updates pods gradually without downtime
-# maxSurge: Allows 1 extra pod during updates for smooth transition
-# maxUnavailable: Ensures no pods are unavailable during updates
-# Health Checks:
-# Liveness Probe: Determines if pod needs to be restarted
-# Readiness Probe: Determines if pod can receive traffic
-# Both use HTTP checks on port 80 to verify nginx is responding
-# Resource Management:
-# Requests: Minimum resources reserved for the container
-# Limits: Maximum resources the container can use
-# Prevents any single pod from consuming too many resources      
-
-
-
 nginx\nginx-namespace.yaml
 ==========================
 apiVersion: v1
