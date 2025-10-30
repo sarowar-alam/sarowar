@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-bluegreen-active
+spec:
+  selector:
+    app: nginx-bluegreen
+  ports:
+    - port: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-bluegreen-preview
+spec:
+  selector:
+    app: nginx-bluegreen
+  ports:
+    - port: 80
