@@ -1,0 +1,56 @@
+# argocd-nginx/argo-applications/nginx-app.yaml
+# ArgoCD Application configuration for deploying Nginx to Kubernetes
+
+# API version and resource type definition for ArgoCD
+apiVersion: argoproj.io/v1alpha1 # ArgoCD Application CRD API version
+kind: Application # This defines an ArgoCD Application resource
+
+# Metadata section - identifies the ArgoCD application
+metadata:
+  name: nginx-demo # Name of the ArgoCD application
+  namespace: argocd # Namespace where ArgoCD is installed (where this Application resource lives)
+
+  # Annotations - provide additional configuration for ArgoCD behavior
+  annotations:
+    # This ensures immediate refresh when changes are detected in the git repository
+    argocd.argoproj.io/refresh-type: hard # Hard refresh forces complete reconciliation
+
+    # Add revision history limit annotation - limits how many sync histories are kept
+    argocd.argoproj.io/revision-history-limit: "3" # Keep only 3 most recent sync histories
+
+# Specification section - defines the ArgoCD application configuration
+spec:
+  project: default # ArgoCD project name (logical grouping of applications)
+
+  # Source configuration - defines where the manifests are stored
+  source:
+    repoURL: https://github.com/sarowar-alam/sarowar.git # Git repository URL
+    targetRevision: main # Git branch/tag/commit to track
+    path: KubeADM-Argo-CD-deployments/nginx # Path within the repository where Kubernetes manifests are located
+
+  # Destination configuration - defines where to deploy the application
+  destination:
+    server: https://kubernetes.default.svc # Target Kubernetes cluster (same cluster where ArgoCD is running)
+    namespace: nginx-demo # Target namespace in the Kubernetes cluster
+
+  # Sync policy - defines how synchronization should behave
+  syncPolicy:
+    # Automated sync configuration
+    automated:
+      prune: true # Automatically delete resources when they are removed from git
+      selfHeal: true # Automatically revert any manual changes in the cluster to match git state
+
+    # Retry configuration for failed sync operations
+    retry:
+      limit: 5 # Maximum number of retry attempts for failed syncs
+      backoff:
+        duration: 5s # Initial wait time before first retry (5 seconds)
+        factor: 2 # Multiplier for exponential backoff (double each time)
+        maxDuration: 3m # Maximum duration between retry attempts (3 minutes)
+
+    # Sync options - additional synchronization behaviors
+    syncOptions:
+      - CreateNamespace=true # Automatically create the target namespace if it doesn't exist
+      - ApplyOutOfSyncOnly=true # Only sync resources that are out of sync (improves performance)
+      - PruneLast=true # Run pruning after all other sync operations are complete
+
