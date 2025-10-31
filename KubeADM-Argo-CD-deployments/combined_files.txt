@@ -1,0 +1,283 @@
+﻿app-bluegreen\kustomization.yaml
+================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - rollout.yaml
+  - service.yaml
+
+
+
+app-bluegreen\rollout.yaml
+==========================
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: nginx-bluegreen
+spec:
+  replicas: 3
+  strategy:
+    blueGreen:
+      activeService: nginx-bluegreen-active
+      previewService: nginx-bluegreen-preview
+      autoPromotionEnabled: false
+  selector:
+    matchLabels:
+      app: nginx-bluegreen
+  template:
+    metadata:
+      labels:
+        app: nginx-bluegreen
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27
+          ports:
+            - containerPort: 80
+
+
+
+app-bluegreen\service.yaml
+==========================
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-bluegreen-active
+spec:
+  selector:
+    app: nginx-bluegreen
+  ports:
+    - port: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-bluegreen-preview
+spec:
+  selector:
+    app: nginx-bluegreen
+  ports:
+    - port: 80
+
+
+
+app-canary\kustomization.yaml
+=============================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - rollout.yaml
+  - service.yaml
+
+
+
+app-canary\rollout.yaml
+=======================
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: nginx-canary
+spec:
+  replicas: 5
+  strategy:
+    canary:
+      steps:
+        - setWeight: 20
+        - pause: { duration: 30s }
+        - setWeight: 50
+        - pause: { duration: 1m }
+        - setWeight: 100
+  selector:
+    matchLabels:
+      app: nginx-canary
+  template:
+    metadata:
+      labels:
+        app: nginx-canary
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27
+          ports:
+            - containerPort: 80
+
+
+
+app-canary\service.yaml
+=======================
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-canary-svc
+spec:
+  selector:
+    app: nginx-canary
+  ports:
+    - port: 80
+
+
+
+app-rolling\deployment.yaml
+===========================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-rolling
+  labels:
+    app: nginx-rolling
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx-rolling
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: nginx-rolling
+    spec:
+    containers:
+      - name: nginx
+        image: nginx:1.27
+        ports:
+          - containerPort: 80
+
+
+
+app-rolling\kustomization.yaml
+==============================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml
+  - service.yaml
+
+
+
+app-rolling\service.yaml
+========================
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-rolling-svc
+spec:
+  selector:
+    app: nginx-rolling
+  ports:
+    - port: 80
+      targetPort: 80
+
+
+
+nginx\nginx-deployment.yaml
+===========================
+# nginx/nginx-deployment.yaml
+# Kubernetes Deployment configuration for Nginx
+
+# API version and resource type definition
+apiVersion: apps/v1          # Using the apps/v1 API version for Deployment resources
+kind: Deployment             # This defines the resource type as a Deployment
+
+# Metadata section - identifies the deployment
+metadata:
+  name: nginx-deployment     # Name of the deployment resource
+  namespace: nginx-demo      # Kubernetes namespace where this deployment will be created
+  labels:                    # Labels for identifying the deployment
+    app: nginx               # Label with key 'app' and value 'nginx'
+
+# Specification section - defines the desired state of the deployment
+spec:
+  replicas: 2                # Number of pod replicas to maintain (3 identical nginx pods)
+  
+  # Selector - tells the deployment how to find which pods to manage
+  selector:
+    matchLabels:             # Pods with these labels will be managed by this deployment
+      app: nginx             # Must match the labels in the pod template below
+  
+  # Update strategy - defines how pods are replaced during updates
+  strategy:
+    type: RollingUpdate      # Gradually replace old pods with new ones (zero downtime)
+    rollingUpdate:
+      maxSurge: 1            # Maximum number of extra pods allowed during update (1 extra pod)
+      maxUnavailable: 0      # Maximum number of unavailable pods during update (0 = full availability)
+  
+  # Pod template - defines the specification for the pods that will be created
+  template:
+    metadata:
+      labels:                # Labels that will be applied to each pod
+        app: nginx           # Same label as in the selector above
+    
+    # Pod specification - defines the containers and runtime properties
+    spec:
+      containers:
+      - name: nginx          # Name of the container within the pod
+        image: sarowaralam/sarowar-nginx-03  # Docker image to use for the container
+        
+        # Container ports - defines which ports the container exposes
+        ports:
+        - containerPort: 80  # Nginx listens on port 80
+        
+        # Resource requirements and limits - controls CPU and memory allocation
+        resources:
+          requests:          # Minimum resources guaranteed to the container
+            cpu: 100m        # 0.1 CPU cores (100 millicores)
+            memory: 128Mi    # 128 Mebibytes of memory
+          limits:            # Maximum resources the container can use
+            cpu: 200m        # 0.2 CPU cores maximum
+            memory: 256Mi    # 256 Mebibytes of memory maximum
+        
+        # Liveness probe - checks if the container is running properly
+        livenessProbe:
+          httpGet:           # Uses HTTP GET request to check health
+            path: /          # HTTP path to check (root path)
+            port: 80         # Port to check on
+          initialDelaySeconds: 5   # Wait 5 seconds before first check
+          periodSeconds: 10        # Check every 10 seconds
+          timeoutSeconds: 5        # Timeout after 5 seconds if no response
+          failureThreshold: 3      # Mark as failed after 3 consecutive failures
+        
+        # Readiness probe - checks if the container is ready to serve traffic
+        readinessProbe:
+          httpGet:           # Uses HTTP GET request to check readiness
+            path: /          # HTTP path to check (root path)
+            port: 80         # Port to check on
+          initialDelaySeconds: 5   # Wait 5 seconds before first check
+          periodSeconds: 10        # Check every 10 seconds
+          timeoutSeconds: 5        # Timeout after 5 seconds if no response
+          failureThreshold: 3      # Mark as unready after 3 consecutive failures
+        
+        imagePullPolicy: IfNotPresent  # Pull image only if not already present locally
+      
+      restartPolicy: Always  # Always restart the container if it fails
+
+
+nginx\nginx-namespace.yaml
+==========================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nginx-demo
+
+
+nginx\nginx-service.yaml
+========================
+# nginx\nginx-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+  namespace: nginx-demo
+spec:
+  selector:
+    app: nginx
+  ports:
+  - port: 80
+    targetPort: 80
+  type: ClusterIP
+
+
+
