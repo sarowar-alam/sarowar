@@ -1,0 +1,28 @@
+# cluster-admin-role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cluster-viewer
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cluster-viewer-binding
+subjects:
+- kind: ServiceAccount
+  name: monitoring-user
+  namespace: monitoring-team
+roleRef:
+  kind: ClusterRole
+  name: cluster-viewer
+  apiGroup: rbac.authorization.k8s.io

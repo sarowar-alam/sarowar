@@ -1,0 +1,44 @@
+# Application 2: Monitoring Team App
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: monitoring-app
+  namespace: monitoring-team
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: monitoring-app
+  template:
+    metadata:
+      labels:
+        app: monitoring-app
+    spec:
+      containers:
+      - name: prometheus
+        image: prom/prometheus:latest
+        ports:
+        - containerPort: 9090
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: monitoring-service
+  namespace: monitoring-team
+spec:
+  selector:
+    app: monitoring-app
+  ports:
+    - protocol: TCP
+      port: 9090
+      targetPort: 9090
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: monitoring-config
+  namespace: monitoring-team
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s

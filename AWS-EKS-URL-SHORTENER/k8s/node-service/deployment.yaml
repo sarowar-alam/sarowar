@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: node-service
+  namespace: urlshortener
+  labels:
+    app: node-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: node-service
+  template:
+    metadata:
+      labels:
+        app: node-service
+    spec:
+      containers:
+        - name: node-service
+          image: 388779989543.dkr.ecr.ap-south-1.amazonaws.com/node-service:latest
+          ports:
+            - containerPort: 3000
+          # Change mount path to subdirectory
+          volumeMounts:
+            - name: node-data
+              mountPath: /app/data # Mount to subdirectory, not root /app
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: node-data
+          persistentVolumeClaim:
+            claimName: node-data

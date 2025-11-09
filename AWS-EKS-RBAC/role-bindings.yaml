@@ -1,0 +1,42 @@
+# rolebindings.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dev-binding
+  namespace: dev-team
+subjects:
+- kind: ServiceAccount
+  name: dev-user
+  namespace: dev-team
+roleRef:
+  kind: Role
+  name: developer-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: monitoring-binding
+  namespace: monitoring-team
+subjects:
+- kind: ServiceAccount
+  name: monitoring-user
+  namespace: monitoring-team
+roleRef:
+  kind: Role
+  name: monitoring-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: application-binding
+  namespace: dev-team
+subjects:
+- kind: ServiceAccount
+  name: application-sa
+  namespace: dev-team
+roleRef:
+  kind: Role
+  name: application-role
+  apiGroup: rbac.authorization.k8s.io

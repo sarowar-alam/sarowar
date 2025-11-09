@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-service
+  namespace: urlshortener
+  labels:
+    app: go-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: go-service
+  template:
+    metadata:
+      labels:
+        app: go-service
+    spec:
+      containers:
+        - name: go-service
+          image: 388779989543.dkr.ecr.ap-south-1.amazonaws.com/go-service:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: PYTHON_SERVICE_URL
+              value: "http://python-service.urlshortener:5000"
+            - name: REDIS_URL
+              value: "redis:6379"
+            - name: EXTERNAL_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: url-config
+                  key: go-service-base-url
+          # Change mount path to a subdirectory, not the root /app
+          volumeMounts:
+            - name: go-data
+              mountPath: /app/data # Mount to subdirectory
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: go-data
+          persistentVolumeClaim:
+            claimName: go-data

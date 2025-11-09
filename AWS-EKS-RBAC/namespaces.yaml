@@ -1,0 +1,14 @@
+# namespaces.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev-team
+  labels:
+    team: development
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring-team
+  labels:
+    team: monitoring

@@ -1,0 +1,21 @@
+# Application 3: Application SA Test App
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-sa-test
+  namespace: dev-team
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: app-sa-test
+  template:
+    metadata:
+      labels:
+        app: app-sa-test
+    spec:
+      serviceAccountName: application-sa
+      containers:
+      - name: busybox
+        image: busybox:latest
+        command: ['sh', '-c', 'echo "Application SA Test" && sleep 3600']
