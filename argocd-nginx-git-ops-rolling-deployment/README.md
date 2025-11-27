@@ -1,6 +1,6 @@
 # 🚀 Argo CD NGINX GitOps Project
 
-This repository demonstrates a **GitOps-based deployment pipeline** using **Argo CD** and **Amazon EKS** to manage a Kubernetes NGINX application. The project showcases how Argo CD continuously monitors your Git repository, detects any manifest changes, and automatically applies them to your Kubernetes cluster — ensuring full synchronization between Git and the running environment.
+--This repository demonstrates a **GitOps-based deployment pipeline** using **Argo CD** and **Amazon EKS** to manage a Kubernetes NGINX application. The project showcases how Argo CD continuously monitors your Git repository, detects any manifest changes, and automatically applies them to your Kubernetes cluster — ensuring full synchronization between Git and the running environment.
 
 ---
 
