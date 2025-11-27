@@ -3,7 +3,7 @@ Automation Garage
 
 ---
 
-## 🧑‍💻 Author
+## 🧑‍💻 Author --
 **Md. Sarowar Alam**  
 Lead DevOps Engineer, Hogarth Worldwide  
 📧 Email: sarowar@hotmail.com  
