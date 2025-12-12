@@ -223,8 +223,11 @@ router.get('/measurements', async (req, res) => {
 // GET /api/measurements/trends - Get 30-day BMI trends
 router.get('/measurements/trends', async (req, res) => {
   try {
-    const q = `SELECT date_trunc('day',created_at)day,avg(bmi)avg_bmi FROM measurements
-    WHERE created_at>now()-interval '30 days' GROUP BY day ORDER BY day`;
+    const q = `SELECT date_trunc('day',created_at) AS day, AVG(bmi) AS avg_bmi 
+    FROM measurements
+    WHERE created_at > now() - interval '30 days' 
+    GROUP BY day 
+    ORDER BY day`;
     const r = await db.query(q);
     res.json({ rows: r.rows });
   } catch (e) {
