@@ -58,11 +58,6 @@ body {
   gap: 0.75rem;
 }
 
-.app-header h1::before {
-  content: "💪";
-  font-size: 2.5rem;
-}
-
 .app-subtitle {
   text-align: center;
   color: var(--gray-600);
@@ -217,21 +212,10 @@ button:disabled {
   border: 1px solid #fecaca;
 }
 
-.alert-error::before {
-  content: "⚠️";
-  font-size: 1.25rem;
-}
-
 .alert-success {
   background-color: #f0fdf4;
   color: #166534;
   border: 1px solid #bbf7d0;
-}
-
-.alert-success::before {
-  content: "✓";
-  font-size: 1.25rem;
-  font-weight: bold;
 }
 
 /* Loading State */
@@ -327,13 +311,6 @@ button:disabled {
   background: var(--gray-50);
   border-radius: 12px;
   border: 2px dashed var(--gray-300);
-}
-
-.empty-state::before {
-  content: "📊";
-  display: block;
-  font-size: 3rem;
-  margin-bottom: 1rem;
 }
 
 /* Chart Container */

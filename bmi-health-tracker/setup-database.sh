@@ -48,7 +48,7 @@ export PGPASSWORD=$DB_PASS
 psql -U $DB_USER -d $DB_NAME -h localhost -f backend/migrations/001_create_measurements.sql
 
 echo ""
-echo "✓ Database setup complete!"
+echo "Database setup complete!"
 echo ""
 echo "Your DATABASE_URL should be:"
 echo "postgresql://$DB_USER:$DB_PASS@localhost:5432/$DB_NAME"

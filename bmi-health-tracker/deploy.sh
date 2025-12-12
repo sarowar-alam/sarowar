@@ -5,7 +5,7 @@
 
 set -e  # Exit on any error
 
-echo "🚀 BMI Health Tracker Deployment Script"
+echo "BMI Health Tracker Deployment Script"
 echo "========================================"
 
 # Colors for output
@@ -22,11 +22,11 @@ fi
 
 # Function to print colored output
 print_status() {
-    echo -e "${GREEN}✓${NC} $1"
+    echo -e "${GREEN}[OK]${NC} $1"
 }
 
 print_error() {
-    echo -e "${RED}✗${NC} $1"
+    echo -e "${RED}[ERROR]${NC} $1"
 }
 
 print_info() {
@@ -115,7 +115,7 @@ sudo env PATH=$PATH:/usr/bin pm2 startup systemd -u $USER --hp $HOME
 
 echo ""
 echo -e "${GREEN}================================${NC}"
-echo -e "${GREEN}✓ Deployment Complete!${NC}"
+echo -e "${GREEN}Deployment Complete!${NC}"
 echo -e "${GREEN}================================${NC}"
 echo ""
 echo "Backend Status:"
