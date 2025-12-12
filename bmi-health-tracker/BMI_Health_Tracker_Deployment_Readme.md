@@ -116,7 +116,7 @@ sudo -u postgres createuser --interactive --pwprompt
 
 # Enter details:
 # Username: bmi_user
-# Password: [Enter a strong password]
+# Password: [ostad2025]
 # Superuser: n
 # Create databases: n
 # Create roles: n

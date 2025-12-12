@@ -11,6 +11,7 @@ export default function TC(){
     setLoading(true);
     api.get('/measurements/trends')
       .then(r=>{
+        console.log('Trend data:', r.data);
         const rows=r.data.rows;
         if(rows && rows.length > 0){
           sd({
@@ -23,18 +24,21 @@ export default function TC(){
               tension:0.1
             }]
           });
+        } else {
+          setError(null); // Clear error if no data
         }
       })
       .catch(err=>{
         console.error('Failed to load trends:',err);
+        console.error('Error details:', err.response?.data);
         setError('Failed to load trend data');
       })
       .finally(()=>setLoading(false));
   },[]);
   
-  if(loading) return <div>Loading chart...</div>;
-  if(error) return <div style={{color:'red'}}>{error}</div>;
-  if(!d) return <div>No trend data available yet. Add more measurements!</div>;
+  if(loading) return <div className="loading">Loading chart</div>;
+  if(error) return <div className="alert alert-error">{error}</div>;
+  if(!d) return <div className="empty-state"><p>No trend data available yet. Add measurements over multiple days to see trends!</p></div>;
   
   return <Line data={d} options={{
     responsive:true,
