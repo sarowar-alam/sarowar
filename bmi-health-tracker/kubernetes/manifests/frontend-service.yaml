@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+  namespace: bmi-health-tracker
+  labels:
+    app: bmi-frontend
+spec:
+  type: LoadBalancer  # Change to NodePort for on-premise or ClusterIP with Ingress
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  selector:
+    app: bmi-frontend

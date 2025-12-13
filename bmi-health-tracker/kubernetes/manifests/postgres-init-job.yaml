@@ -1,0 +1,73 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: postgres-init
+  namespace: bmi-health-tracker
+  labels:
+    app: postgres-init
+spec:
+  template:
+    metadata:
+      labels:
+        app: postgres-init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: init-db
+        image: postgres:15-alpine
+        env:
+        - name: PGHOST
+          value: postgres-service
+        - name: PGPORT
+          value: "5432"
+        - name: PGUSER
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: POSTGRES_USER
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: POSTGRES_PASSWORD
+        - name: PGDATABASE
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: POSTGRES_DB
+        command:
+        - /bin/sh
+        - -c
+        - |
+          # Wait for PostgreSQL to be ready
+          until pg_isready -h $PGHOST -p $PGPORT -U $PGUSER; do
+            echo "Waiting for PostgreSQL to be ready..."
+            sleep 2
+          done
+          
+          # Run the migration
+          psql -h $PGHOST -U $PGUSER -d $PGDATABASE <<'EOF'
+          CREATE TABLE IF NOT EXISTS measurements (
+            id SERIAL PRIMARY KEY,
+            weight_kg NUMERIC(5,2) NOT NULL CHECK (weight_kg > 0 AND weight_kg <= 500),
+            height_cm NUMERIC(5,2) NOT NULL CHECK (height_cm > 0 AND height_cm <= 300),
+            age INTEGER NOT NULL CHECK (age > 0 AND age <= 150),
+            sex VARCHAR(10) NOT NULL CHECK (sex IN ('male', 'female')),
+            activity_level VARCHAR(20) NOT NULL CHECK (activity_level IN ('sedentary', 'light', 'moderate', 'active', 'very_active')),
+            bmi NUMERIC(5,2) NOT NULL,
+            bmi_category VARCHAR(20),
+            bmr INTEGER,
+            daily_calories INTEGER,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+          );
+          
+          CREATE INDEX IF NOT EXISTS idx_measurements_created_at ON measurements(created_at DESC);
+          CREATE INDEX IF NOT EXISTS idx_measurements_bmi ON measurements(bmi);
+          
+          COMMENT ON TABLE measurements IS 'Health measurements including BMI, BMR, and daily calorie needs';
+          COMMENT ON COLUMN measurements.bmi IS 'Body Mass Index calculated from weight and height';
+          COMMENT ON COLUMN measurements.bmr IS 'Basal Metabolic Rate in calories';
+          COMMENT ON COLUMN measurements.daily_calories IS 'Daily calorie needs based on BMR and activity level';
+          EOF
+          
+          echo "Database migration completed successfully!"
